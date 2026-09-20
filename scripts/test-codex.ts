@@ -4,19 +4,22 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { isRecord } from "../packages/proxy/src/lib/validation"
-import { fetchCodexCatalog, resolveConduitApiKey } from "../packages/proxy/src/lib/codex-cli"
+import { fetchCodexCatalog, parseCodexArguments, resolveConduitApiKey } from "../packages/proxy/src/lib/codex-cli"
 import { codexConfigOverrides, normalizeCodexBaseUrl } from "../packages/proxy/src/lib/codex-config"
-import { selectCodexModel } from "../packages/proxy/src/lib/codex-catalog"
-import { hasMcpImage, isSuccessfulMcpCall } from "../packages/proxy/src/lib/codex-output"
+import { selectCodexModel, withCodexContextBudget } from "../packages/proxy/src/lib/codex-catalog"
+import { codexRuntimeContextWindow, hasMcpImage, isSuccessfulMcpCall } from "../packages/proxy/src/lib/codex-output"
 
 const args = process.argv.slice(2)
 if (args.includes("--help")) {
   console.log(`Usage: bun run test:codex [--model MODEL] [--base-url URL] [--browser]
+                          [--reasoning-effort EFFORT] [--context-budget TOKENS] [--web-search]
 
 Opt-in, billable integration tests against your running Conduit proxy.
 Uses a temporary Codex home/workspace; does not edit personal configuration.
 Requires Codex 0.155.1 or compatible. --browser additionally requires Chrome
 and a cached Playwright MCP 0.0.82 (bunx @playwright/mcp@0.0.82 --help).
+Reasoning defaults to low when advertised. Explicit context budgets are verified
+against Codex runtime events; this is not a full-window capacity stress test.
 
 Environment: CONDUIT_API_KEY (or repository .conduit-key), CODEX_BIN,
 CONDUIT_BASE_URL, CONDUIT_CODEX_MODEL, CONDUIT_CHROME_PATH.`)
@@ -26,14 +29,20 @@ CONDUIT_BASE_URL, CONDUIT_CODEX_MODEL, CONDUIT_CHROME_PATH.`)
 let selectedModel = process.env.CONDUIT_CODEX_MODEL
 let baseUrl = process.env.CONDUIT_BASE_URL ?? "http://127.0.0.1:7133"
 let browser = false
+let webSearch = false
+let reasoningEffort: string | undefined
+let contextBudget: number | undefined
 for (let index = 0; index < args.length; index++) {
   const argument = args[index]
   if (argument === "--browser") browser = true
-  else if (argument === "--model" || argument === "--base-url") {
+  else if (argument === "--web-search") webSearch = true
+  else if (argument === "--model" || argument === "--base-url" || argument === "--reasoning-effort" || argument === "--context-budget") {
     const value = args[++index]
     if (!value || value.startsWith("--")) throw new Error(`${argument} requires a value.`)
     if (argument === "--model") selectedModel = value
-    else baseUrl = value
+    else if (argument === "--base-url") baseUrl = value
+    else if (argument === "--reasoning-effort") reasoningEffort = value
+    else contextBudget = parseCodexArguments(["--context-budget", value]).contextBudget
   } else throw new Error(`Unknown option: ${argument}. Use --help.`)
 }
 
@@ -50,7 +59,15 @@ const clientVersion = version.match(/\d+\.\d+\.\d+/)?.[0]
 if (!clientVersion) throw new Error("Could not determine the Codex CLI version.")
 
 const catalog = await fetchCodexCatalog(apiRoot, apiKey)
-const selected = selectCodexModel(catalog, selectedModel)
+let selected = selectCodexModel(catalog, selectedModel)
+if (contextBudget !== undefined) {
+  selected = withCodexContextBudget(selected, contextBudget)
+  const configured = selected
+  catalog.models = catalog.models.map(model => model.slug === configured.slug ? configured : model)
+}
+if (reasoningEffort !== undefined && !selected.supported_reasoning_levels.some(level => level.effort === reasoningEffort)) {
+  throw new Error(`${selected.slug} does not advertise reasoning effort ${JSON.stringify(reasoningEffort)}.`)
+}
 const model = selected.slug
 
 const temporary = await mkdtemp(join(tmpdir(), "conduit-codex-"))
@@ -61,9 +78,14 @@ let fixture: ReturnType<typeof Bun.serve> | undefined
 async function run(prompt: string, extra: string[] = []): Promise<Array<Record<string, unknown>>> {
   const overrides = codexConfigOverrides(apiRoot, join(temporary, "models.json"), selected)
   overrides.push("model_providers.conduit.request_max_retries=0", "model_providers.conduit.stream_max_retries=0")
-  if (selected.supported_reasoning_levels.some(level => level.effort === "low")) overrides.push('model_reasoning_effort="low"')
+  if (reasoningEffort !== undefined) overrides.push(`model_reasoning_effort=${JSON.stringify(reasoningEffort)}`)
+  else if (selected.supported_reasoning_levels.some(level => level.effort === "low")) overrides.push('model_reasoning_effort="low"')
+  if (contextBudget !== undefined) {
+    overrides.push(`model_context_window=${selected.context_window}`, `model_auto_compact_token_limit=${selected.auto_compact_token_limit}`)
+  }
   const child = Bun.spawn([
-    binary, "exec", "--strict-config", "--skip-git-repo-check", "--ephemeral",
+    binary, "exec", "--strict-config", "--skip-git-repo-check",
+    ...(contextBudget === undefined ? ["--ephemeral"] : []),
     "--ignore-user-config", "--ignore-rules", "--sandbox", "workspace-write",
     "--json", "--cd", workspace,
     ...overrides.flatMap(value => ["-c", value]),
@@ -129,6 +151,19 @@ try {
   assert.deepEqual(JSON.parse(answer.text), { ok: true, value: 42 })
   console.log("PASS: Codex --output-schema")
 
+  if (webSearch) {
+    const search = completedItems(await run(
+      "Use native live web search to find the official OpenAI Codex GitHub repository now. " +
+      "Return its official HTTPS URL with a source citation. Do not use shell tools or local files.",
+      ["-c", 'web_search="live"'],
+    ))
+    assert(search.some(item => item.type === "web_search" && isRecord(item.action) && item.action.type === "search"),
+      "Codex did not perform an actual native web search.")
+    assert(search.some(item => item.type === "agent_message" && String(item.text).includes("https://github.com/openai/codex")),
+      "The search answer did not include the expected official source.")
+    console.log("PASS: native live web search and official source")
+  }
+
   if (browser) {
     let verified = false
     fixture = Bun.serve({
@@ -184,6 +219,17 @@ try {
     assert(screenshot, `No screenshot image was returned to Codex: ${JSON.stringify(diagnostics)}`)
     assert(results.some((item) => item.type === "agent_message" && String(item.text).trim() === "CONDUIT_BROWSER_OK"))
     console.log("PASS: isolated MCP browser navigation, typing, clicking and screenshot/image feedback")
+  }
+  if (contextBudget !== undefined) {
+    const observed = new Set<number>()
+    for await (const file of new Bun.Glob("sessions/**/*.jsonl").scan({ cwd: home })) {
+      for (const line of (await readFile(join(home, file), "utf8")).split("\n").filter(Boolean)) {
+        const tokens = codexRuntimeContextWindow(JSON.parse(line))
+        if (tokens !== null) observed.add(tokens)
+      }
+    }
+    assert.deepEqual([...observed], [contextBudget], "Codex did not report the requested usable runtime context budget.")
+    console.log(`PASS: runtime model_context_window is exactly ${contextBudget} tokens (not a full-window load test)`)
   }
   console.log("All requested Codex smoke checks passed.")
 } finally {

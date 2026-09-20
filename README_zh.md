@@ -61,6 +61,18 @@ Codex 模型目录，再通过自定义 Responses provider 启动 Codex。
 模型选择、手动配置、联网搜索、浏览器 MCP 和故障排查见
 [Codex 专项说明](./docs/CODEX.md)。
 
+需要 **Astra + max 思考 + 实时联网搜索 + 精确 872k 可用上下文**时：
+
+```bash
+./bin/conduit-codex --model gpt-6-astra --context-budget 872000 -- \
+  -c 'model_reasoning_effort="max"' -c 'web_search="live"'
+```
+
+2026-09-21 已通过真实 CLI 验证：上游回传 `effort: max`，实际执行搜索并返回引用，
+Codex 运行时上下文为 `872000`。自动压缩阈值为 `784800`。
+这里的 872k 是客户端可用输入预算，不冒充 Copilot 的独立服务端档位；
+尚未做填满 872k tokens 的大输入压力测试。已有会话需要退出后用新命令启动。
+
 ### 使用 Claude Code
 
 请从当前账户实际可用的模型中选择：
@@ -85,7 +97,7 @@ Claude 别名不可用时的既有回退逻辑，以及
 | Codex HTTP/SSE、shell、自定义 `apply_patch` | 真实 CLI 端到端通过 |
 | 多轮函数、自定义工具、MCP 工具结果 | 保留原协议，支持图像结果 |
 | 加密推理、指令、结构化输出及新增 Responses 字段 | 原生透传 |
-| 原生 `web_search` | Sol 实测通过，仍取决于上游和模型 |
+| 原生 `web_search` | Sol、Astra（包括 max 思考）实测通过，仍取决于上游和模型 |
 | CLI 浏览器操作 | 隔离的 Playwright MCP 实测通过 |
 | 原生 `computer` / `computer_use_preview` | **Copilot 实测返回不支持** |
 | WebSocket Responses | 未启用；明确回退到 HTTP |

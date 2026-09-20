@@ -8,6 +8,9 @@ export const CODEX_REASONING_EFFORTS: readonly CodexReasoningEffort[] = [
 
 export const VERIFIED_CODEX_BASELINE_MODEL = "gpt-5.4-mini"
 export const VERIFIED_HOSTED_SEARCH_MODEL = "gpt-5.6-sol"
+export const VERIFIED_HOSTED_SEARCH_MODELS: readonly string[] = [
+  VERIFIED_HOSTED_SEARCH_MODEL, "gpt-6-astra",
+]
 export const VERIFIED_CODEX_CODING_MODELS: readonly string[] = [
   VERIFIED_CODEX_BASELINE_MODEL, "gpt-6-astra", VERIFIED_HOSTED_SEARCH_MODEL,
 ]
@@ -24,7 +27,7 @@ export function verifiedCodexCapabilities(model: Model | undefined): CodexVerifi
     tool_search: baseline,
     mcp_browser: baseline && model?.capabilities.supports.vision === true,
     structured_outputs: coding && model?.capabilities.supports.structured_outputs === true,
-    hosted_web_search: nativeTools && model?.id === VERIFIED_HOSTED_SEARCH_MODEL,
+    hosted_web_search: nativeTools && model !== undefined && VERIFIED_HOSTED_SEARCH_MODELS.includes(model.id),
   }
 }
 
@@ -126,6 +129,24 @@ export function selectCodexModel(catalog: CodexCatalog, requested?: string): Cod
   const model = [...catalog.models].sort((a, b) => a.priority - b.priority || a.slug.localeCompare(b.slug, "en"))[0]
   if (!model) throw new Error("No enabled native Responses models with streaming, tool calls, and known input limits are available.")
   return model
+}
+
+export function withCodexContextBudget(model: CodexModelInfo, tokens: number): CodexModelInfo {
+  if (!Number.isSafeInteger(tokens) || tokens < 4096) {
+    throw new Error("Context budget must be an integer of at least 4096 tokens.")
+  }
+  if (tokens > model.context_window) {
+    throw new Error(`Context budget ${tokens} exceeds ${model.slug}'s advertised input limit of ${model.context_window} tokens.`)
+  }
+  return {
+    ...model,
+    context_window: tokens,
+    max_context_window: tokens,
+    // The requested value is an already-reserved input budget, not a raw model window.
+    effective_context_window_percent: 100,
+    auto_compact_token_limit: Math.floor(tokens * 0.9),
+    truncation_policy: { ...model.truncation_policy, limit: Math.min(model.truncation_policy.limit, tokens) },
+  }
 }
 
 function reasoningEffort(value: unknown): value is CodexReasoningEffort {

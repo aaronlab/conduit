@@ -4,7 +4,7 @@ Copilot's model catalog is account- and policy-dependent. Refresh
 `/api/copilot/models?refresh=true` for the current list; a historical model
 name below does not guarantee current availability.
 
-## Codex / Responses (2026-09-20)
+## Codex / Responses (2026-09-21)
 
 See [CODEX.md](./CODEX.md) for the live test matrix and reproducible CLI checks.
 Codex requires native Responses, not the older Chat wire protocol.
@@ -15,8 +15,12 @@ Codex requires native Responses, not the older Chat wire protocol.
 - Context/prompt limits, vision, parallel tools and reasoning choices come
   from current Copilot metadata. Declared limits are not stress-test results.
 - HTTP/SSE preserves custom tools, tool-output images and opaque reasoning.
-- Sol native web search and CLI browser automation via Playwright MCP were
+- Sol/Astra native web search and CLI browser automation via Playwright MCP were
   tested. Native computer tools returned explicit upstream 400 errors.
+- Astra search at `reasoning.effort=max` was confirmed by the upstream response.
+  `--context-budget 872000` was confirmed by Codex's actual runtime token-count
+  event, not just the catalog. This is a client budget, not an undocumented
+  Responses tier or a full-window load test; see the Codex guide.
 - Chat clients automatically bridge newly published Responses-only models,
   rather than relying only on a fixed `gpt-5.5`/Sol name list.
 - Virtual `gpt-5.5-*` effort aliases remain authoritative. For a real model

@@ -1,8 +1,9 @@
 # Codex with Conduit
 
-Verified on **2026-09-20**, using **Codex CLI 0.155.1** and the current Copilot
-model API. This guide distinguishes native protocol support from hosted
-services that Copilot does not provide.
+Verified using **Codex CLI 0.155.1** and the current Copilot model API, with
+additional Astra max-effort/search/context-budget verification on **2026-09-21**.
+This guide distinguishes native protocol support from hosted services that
+Copilot does not provide.
 
 ## Recommended setup
 
@@ -77,6 +78,66 @@ Important:
 - An API key for OpenAI is not required. A Copilot-enabled account and the
   separate local Conduit key are required.
 
+## Astra: max effort, live search and an exact 872k client budget
+
+```bash
+./bin/conduit-codex --model gpt-6-astra --context-budget 872000 -- \
+  -c 'model_reasoning_effort="max"' \
+  -c 'web_search="live"'
+```
+
+The three settings are independent. A sandbox/approval bypass does not select
+max reasoning, enable search or choose a context window.
+
+- `model_reasoning_effort="max"` was observed in the actual Codex request and
+  echoed as `reasoning.effort: "max"` by Copilot.
+- Native Astra search returned real `web_search_call` search/open-page items
+  and URL citations, through both `/responses` and Codex CLI.
+- `--context-budget 872000` sets the selected model's **usable client input
+  budget** to exactly 872,000 tokens. An actual Codex `token_count` event
+  confirmed `model_context_window: 872000`.
+- Automatic compaction starts at 784,800 tokens (90%). This is not a claim
+  that the model will wait until the entire window is full before compacting.
+- The option rejects budgets below 4,096 or above the current advertised input
+  limit. It saves a separate private catalog, leaves other model entries and
+  the default catalog unchanged, and does not edit your user configuration.
+
+**Why not just `-c model_context_window=872000`?** Codex normally multiplies the
+catalog window by its `effective_context_window_percent`, which defaults to
+95. That combination would expose only **828,400** usable tokens. The explicit
+budget option marks the value as already reserved (`effective...=100`) and
+sets matching CLI window/compaction overrides, so a pre-existing user setting
+does not silently replace it. Do not combine the option with separate
+`model_context_window` or `model_auto_compact_token_limit` overrides.
+
+### Copilot limits are not a named 872k HTTP tier
+
+The live Astra metadata inspected on 2026-09-21 advertised:
+
+| Upstream field | Tokens |
+|---|---:|
+| `max_context_window_tokens` | 1,178,000 |
+| `max_prompt_tokens` | 1,050,000 |
+| `max_output_tokens` | 128,000 |
+
+It advertised `max` reasoning, but **not a named 872k Responses tier**.
+Without an explicit budget, Conduit derives a 1,050,000-token catalog input
+window from those limits; Codex then applies its normal 95% usable factor.
+Reasoning defaults to the catalog's medium level unless user configuration or
+an explicit CLI override selects something else.
+
+The Copilot SDK's `contextTier: "long_context"` is a separate **session RPC**
+option. Codex uses the Responses HTTP contract, not Copilot SDK sessions.
+Conduit does not invent a `context_tier` HTTP field or claim that a local
+budget switches the server to an undocumented tier. The 872k option stays
+within the advertised Copilot limit; it does not raise account limits.
+
+**Verification boundary:** the test confirmed real search, upstream `max`
+effort and the exact runtime client budget. It did **not** submit a full
+872,000-token prompt or establish full-window retrieval quality/throughput.
+Start a new Codex invocation with the command above; an already running
+session does not acquire these overrides automatically.
+
 ## What was actually tested
 
 | Path | Live result |
@@ -86,6 +147,8 @@ Important:
 | Responses reasoning history | Opaque reasoning items survived the CLI tool loop |
 | `text.format` JSON schema | Strict object `{"ok":true,"value":42}` returned |
 | Sol native `web_search` | Real `web_search_call` plus URL citation returned |
+| Astra native `web_search` at `max` | Real search/open-page calls and citations; upstream echoed max |
+| Astra explicit 872k budget | Real Codex runtime context count was exactly 872,000; not a full-window stress test |
 | Codex + Playwright MCP 0.0.82 | Navigation, form fill, click, verified page state and screenshot/image feedback passed |
 | `computer` with `gpt-6-astra` | HTTP 400, `unsupported_value`, tool not supported |
 | `computer_use_preview` with Sol | HTTP 400, `unsupported_value`, tool not supported |
@@ -167,6 +230,10 @@ form and returned screenshot. It does not change your personal MCP settings.
 # Proxy must already be running with the same key.
 bun run test:codex --model gpt-5.4-mini
 
+# Explicit max effort, exact runtime context budget and native web search:
+bun run test:codex --model gpt-6-astra \
+  --reasoning-effort max --context-budget 872000 --web-search
+
 # Optional, actual browser automation:
 bunx @playwright/mcp@0.0.82 --help
 bun run test:codex --model gpt-5.4-mini --browser
@@ -180,6 +247,9 @@ The script is opt-in and consumes Copilot usage. It uses a temporary
 `CODEX_HOME` and workspace, cleans them up, and fails if actual tool/file/image
 evidence is missing. `CONDUIT_CHROME_PATH` optionally selects a Chrome binary.
 Ordinary `bun run test` uses mocked upstreams and makes no inference requests.
+The smoke runner otherwise prefers low reasoning for cost control; use the
+explicit option when verifying `max`. A requested context budget is checked
+against actual saved Codex token-count events in the temporary home.
 
 ## Reliability and unsupported surfaces
 
@@ -211,6 +281,8 @@ Ordinary `bun run test` uses mocked upstreams and makes no inference requests.
 - [Pinned provider contract](https://github.com/openai/codex/blob/be2951ea34f0d295ed0becf97079f92fa5f6950e/codex-rs/model-provider-info/src/lib.rs)
 - [Pinned Responses SSE decoder](https://github.com/openai/codex/blob/be2951ea34f0d295ed0becf97079f92fa5f6950e/codex-rs/codex-api/src/sse/responses.rs)
 - [Pinned model metadata schema](https://github.com/openai/codex/blob/be2951ea34f0d295ed0becf97079f92fa5f6950e/codex-rs/protocol/src/openai_models.rs)
+- [Codex usable-window and compaction calculation](https://github.com/openai/codex/blob/be2951ea34f0d295ed0becf97079f92fa5f6950e/codex-rs/protocol/src/openai_models.rs#L503-L523)
+- [Copilot SDK context-tier session option](https://github.com/github/copilot-sdk/blob/ca166d3eeec17b8efe0294af4b1ef9ca0f4445de/nodejs/src/types.ts#L2376-L2383)
 - [Codex MCP documentation](https://developers.openai.com/codex/mcp/)
 - [Codex browser availability](https://developers.openai.com/codex/browser/?surface=cli)
 - [OpenAI computer-use API](https://developers.openai.com/api/docs/guides/tools-computer-use)

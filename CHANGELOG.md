@@ -5,6 +5,11 @@ All notable changes to Conduit are documented here. Format follows [Keep a Chang
 ## [Unreleased]
 
 ### Added
+- Verified Astra native web search at max effort, plus an opt-in
+  `--context-budget` launcher setting with exact usable-token accounting,
+  upstream-limit validation and separate per-budget catalog caches.
+- Smoke-runner max reasoning, web-search and context-budget options; explicit
+  budgets are verified against Codex runtime token-count events.
 - Codex 0.155.1 integration, a capability-aware native Responses catalog,
   a non-destructive launcher, dashboard setup instructions and a dedicated
   Codex guide.

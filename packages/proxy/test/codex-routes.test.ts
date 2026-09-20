@@ -82,6 +82,8 @@ describe("typed connection information", () => {
       .toMatchObject({ tool_search: true, mcp_browser: true, structured_outputs: true, hosted_web_search: false })
     expect(info.codex.models.find(model => model.id === "gpt-5.6-sol")?.verified_capabilities)
       .toMatchObject({ tool_search: false, mcp_browser: false, hosted_web_search: true })
+    expect(info.codex.models.find(model => model.id === "gpt-6-astra")?.verified_capabilities)
+      .toMatchObject({ tool_search: false, mcp_browser: false, hosted_web_search: true })
     expect(info.codex.web_search).toBe("disabled")
     expect(info.codex.provider.supports_standalone_web_search).toBe(false)
     expect(info.codex.limitations.join(" ")).toContain("Copilot rejected both computer and computer_use_preview")

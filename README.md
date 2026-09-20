@@ -65,6 +65,18 @@ See [the Codex guide](./docs/CODEX.md) for explicit provider configuration,
 model selection, web search, browser MCP setup, verified capabilities and
 troubleshooting.
 
+For Astra with explicit max reasoning, live search and an exact **872,000-token
+usable client budget**:
+
+```bash
+./bin/conduit-codex --model gpt-6-astra --context-budget 872000 -- \
+  -c 'model_reasoning_effort="max"' -c 'web_search="live"'
+```
+
+This combination was verified on 2026-09-21. The budget is a Codex client
+setting, not a claim about an undocumented Copilot server tier or a full-window
+stress test. See the guide for the upstream limits and compaction threshold.
+
 ### Claude Code
 
 Choose models actually available in your account's catalog:
@@ -90,7 +102,7 @@ before relying on an old model name.
 | Codex HTTP/SSE, shell and custom `apply_patch` | Verified end to end |
 | Multi-turn function/custom/MCP tool outputs | Preserved, including images |
 | Opaque reasoning, instructions, schemas and future Responses fields | Native passthrough |
-| Hosted `web_search` | Verified on Sol; upstream/model dependent |
+| Hosted `web_search` | Verified on Sol and Astra (including max effort); upstream/model dependent |
 | CLI browser automation | Verified with isolated Playwright MCP |
 | Native `computer` / `computer_use_preview` | **Rejected by Copilot in live probes** |
 | WebSocket Responses | Disabled; explicit HTTP fallback |

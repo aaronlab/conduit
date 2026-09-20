@@ -144,7 +144,7 @@ describe("Codex 0.155.1 model catalog", () => {
     })
     expect(verifiedCodexCapabilities(nativeModel("gpt-6-astra"))).toEqual({
       freeform_apply_patch: true, structured_outputs: true,
-      tool_search: false, mcp_browser: false, hosted_web_search: false,
+      tool_search: false, mcp_browser: false, hosted_web_search: true,
     })
     expect(Object.values(verifiedCodexCapabilities(nativeModel("untested-native"))).every(value => !value)).toBe(true)
   })

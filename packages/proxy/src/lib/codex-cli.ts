@@ -3,14 +3,14 @@ import { createHash, randomUUID } from "node:crypto"
 import { chmod, lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises"
 import { resolve } from "node:path"
 import { constants } from "node:os"
-import { parseCodexCatalog, selectCodexModel } from "./codex-catalog"
+import { parseCodexCatalog, selectCodexModel, withCodexContextBudget } from "./codex-catalog"
 import { CODEX_VERSION, DEFAULT_CODEX_BASE_URL, codexCatalogUrl, codexConfigOverrides, normalizeCodexBaseUrl } from "./codex-config"
 import type { CodexCatalog } from "./codex-types"
 
 type Environment = Readonly<Record<string, string | undefined>>
 type FetchCatalog = (url: string, init: RequestInit) => Promise<Response>
 
-export const CODEX_HELP = `Usage: bin/conduit-codex [--base-url URL] [--model MODEL] [--] [Codex arguments...]
+export const CODEX_HELP = `Usage: bin/conduit-codex [--base-url URL] [--model MODEL] [--context-budget TOKENS] [--] [Codex arguments...]
 
 Launch installed Codex (tested with ${CODEX_VERSION}) using Conduit's native Responses catalog.
 Run from the Conduit checkout; the proxy must already be running.
@@ -22,6 +22,7 @@ Run from the Conduit checkout; the proxy must already be running.
 Options:
   --base-url URL  Trusted proxy URL, with or without /v1 (default ${DEFAULT_CODEX_BASE_URL})
   --model MODEL  Exact available catalog model; unknown models fail without substitution
+  --context-budget TOKENS  Exact usable client input budget (>=4096, capped by Copilot metadata)
   -h, --help     Show this help without reading keys, fetching, or launching Codex
   --            Pass the remaining arguments to Codex
 
@@ -38,12 +39,15 @@ Sandbox and approval settings are not weakened. WebSockets are disabled; hosted 
 is disabled by default. With a supported model, opt in using -- -c 'web_search="live"'.
 Deferred tool_search is enabled only for the verified baseline; configured MCP tools still
 require their normal approvals. No MCP servers or blanket tool approvals are installed.
+An explicit context budget avoids Codex's extra 5% headroom deduction and compacts at 90%.
+It is a client budget, not an undocumented Copilot API context-tier switch.
 `
 
 interface CliOptions {
   help: boolean
   baseUrl: string
   model: string | undefined
+  contextBudget?: number
   codexArgs: string[]
 }
 
@@ -68,7 +72,7 @@ function configString(value: string): string {
   throw new Error("Could not parse the Codex model override; use --model MODEL.")
 }
 
-function passthroughModel(argv: readonly string[]): string | undefined {
+function passthroughModel(argv: readonly string[], contextBudget?: number): string | undefined {
   let selected: string | undefined
   const choose = (value: string) => {
     if (!value) throw new Error("--model requires a value.")
@@ -100,6 +104,9 @@ function passthroughModel(argv: readonly string[]): string | undefined {
       if (["model_provider", "model_catalog_json", "model_providers"].includes(key) || key.startsWith("model_providers.")) {
         throw new Error(`The helper manages ${key}; use --base-url and --model instead.`)
       }
+      if (contextBudget !== undefined && ["model_context_window", "model_auto_compact_token_limit"].includes(key)) {
+        throw new Error(`--context-budget manages ${key}; do not also pass a conflicting context override.`)
+      }
       if (key === "model_reasoning_summary" && configString(value) !== "none") {
         throw new Error(`${key} is disabled for the Conduit Codex provider.`)
       }
@@ -114,6 +121,7 @@ function passthroughModel(argv: readonly string[]): string | undefined {
 export function parseCodexArguments(argv: readonly string[], env: Environment = {}): CliOptions {
   let baseUrl = env.CONDUIT_CODEX_BASE_URL ?? DEFAULT_CODEX_BASE_URL
   let explicitModel: string | undefined
+  let contextBudget: number | undefined
   const chooseModel = (value: string) => {
     if (explicitModel !== undefined && explicitModel !== value) throw new Error("Conflicting explicit helper model selections; specify one model.")
     explicitModel = value
@@ -127,16 +135,25 @@ export function parseCodexArguments(argv: readonly string[], env: Environment = 
     else if (arg.startsWith("--base-url=")) baseUrl = arg.slice("--base-url=".length)
     else if (arg === "--model" || arg === "-m") chooseModel(argumentValue(argv, ++index, arg))
     else if (arg.startsWith("--model=")) chooseModel(arg.slice("--model=".length))
+    else if (arg === "--context-budget" || arg.startsWith("--context-budget=")) {
+      const value = arg === "--context-budget" ? argumentValue(argv, ++index, arg) : arg.slice("--context-budget=".length)
+      const budget = Number(value)
+      if (!/^\d+$/.test(value) || !Number.isSafeInteger(budget) || budget < 4096) {
+        throw new Error("--context-budget requires an integer of at least 4096 tokens, for example 872000.")
+      }
+      if (contextBudget !== undefined && contextBudget !== budget) throw new Error("Conflicting explicit context budgets; specify one budget.")
+      contextBudget = budget
+    }
     else break
   }
   const codexArgs = argv.slice(index)
-  const passedModel = passthroughModel(codexArgs)
+  const passedModel = passthroughModel(codexArgs, contextBudget)
   if (explicitModel !== undefined && passedModel !== undefined && explicitModel !== passedModel) {
     throw new Error("Conflicting helper and Codex model selections; specify one model.")
   }
   const model = explicitModel ?? passedModel ?? env.CONDUIT_CODEX_MODEL
   if (model !== undefined && !model.trim()) throw new Error("--model requires a value.")
-  return { help: false, baseUrl: normalizeCodexBaseUrl(baseUrl), model, codexArgs }
+  return { help: false, baseUrl: normalizeCodexBaseUrl(baseUrl), model, codexArgs, ...(contextBudget !== undefined && { contextBudget }) }
 }
 
 export function parseConduitKeyFile(text: string): string | null {
@@ -229,8 +246,10 @@ export async function fetchCodexCatalog(
   return parseCodexCatalog(data)
 }
 
-export async function saveCodexCatalog(catalog: CodexCatalog, baseUrl: string, directory: string): Promise<string> {
-  const fingerprint = createHash("sha256").update(normalizeCodexBaseUrl(baseUrl)).digest("hex").slice(0, 16)
+export async function saveCodexCatalog(catalog: CodexCatalog, baseUrl: string, directory: string, variant?: string): Promise<string> {
+  const hash = createHash("sha256").update(normalizeCodexBaseUrl(baseUrl))
+  if (variant !== undefined) hash.update("\0").update(variant)
+  const fingerprint = hash.digest("hex").slice(0, 16)
   const target = resolve(directory, `models-${fingerprint}.json`)
   const staging = `${target}.${process.pid}.${randomUUID()}.partial`
   let staged = false
@@ -300,11 +319,21 @@ export async function runConduitCodex(argv: readonly string[], options: CodexLau
       return 0
     }
     const key = await resolveConduitApiKey(options.repoRoot, env)
-    const catalog = await fetchCodexCatalog(args.baseUrl, key, options.fetchImpl ?? fetch)
-    const model = selectCodexModel(catalog, args.model)
+    let catalog = await fetchCodexCatalog(args.baseUrl, key, options.fetchImpl ?? fetch)
+    let model = selectCodexModel(catalog, args.model)
+    if (args.contextBudget !== undefined) {
+      model = withCodexContextBudget(model, args.contextBudget)
+      const selectedModel = model
+      catalog = { models: catalog.models.map(candidate => candidate.slug === model.slug ? selectedModel : candidate) }
+    }
     const cache = env.CONDUIT_CODEX_CACHE_DIR || resolve(options.repoRoot, "data", "codex")
-    const catalogPath = await saveCodexCatalog(catalog, args.baseUrl, cache)
-    const overrides = codexConfigOverrides(args.baseUrl, catalogPath, model).flatMap(value => ["-c", value])
+    const variant = args.contextBudget === undefined ? undefined : `${model.slug}:${args.contextBudget}`
+    const catalogPath = await saveCodexCatalog(catalog, args.baseUrl, cache, variant)
+    const settings = codexConfigOverrides(args.baseUrl, catalogPath, model)
+    if (args.contextBudget !== undefined) {
+      settings.push(`model_context_window=${model.context_window}`, `model_auto_compact_token_limit=${model.auto_compact_token_limit}`)
+    }
+    const overrides = settings.flatMap(value => ["-c", value])
     return await (options.launch ?? launchCodex)(env.CODEX_BIN || "codex", [...overrides, ...args.codexArgs], {
       ...env,
       CONDUIT_API_KEY: key,
