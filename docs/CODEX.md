@@ -36,9 +36,10 @@ For the optional short command, see [the `cx` preset](#short-command-cx).
 For a manually managed setup, use a user-level Codex configuration like:
 
 ```toml
-model = "gpt-5.4-mini" # Choose an available native Responses model.
+model = "gpt-6-astra" # This model has live-verified reasoning summaries.
 model_provider = "conduit"
-model_reasoning_summary = "none"
+model_reasoning_summary = "detailed"
+hide_agent_reasoning = false
 web_search = "disabled"
 model_catalog_json = "/absolute/path/to/conduit-models.json"
 
@@ -73,8 +74,8 @@ as data, never sourced as a shell script.
 ## Short command: `cx`
 
 `bin/cx` is an explicit opt-in shortcut for the previously described
-**Astra / max / 872,000 usable tokens / live search / no sandbox / no standard
-execution approvals** combination:
+**Astra / max / detailed reasoning summaries / 872,000 usable tokens / live search /
+no sandbox / no standard execution approvals** combination:
 
 ```bash
 ./bin/cx
@@ -121,6 +122,231 @@ Important:
 - Do not copy prerelease-only settings into a stable Codex configuration.
 - An API key for OpenAI is not required. A Copilot-enabled account and the
   separate local Conduit key are required.
+
+## Official desktop GUI through Conduit (macOS)
+
+**Verified on 2026-09-21:** official ChatGPT desktop **26.915.31945**, signed by
+OpenAI OpCo, LLC (`2DC432GLL2`), with bundled Codex app-server
+`0.155.0-alpha.9.2`. Both the **Codex** developer view and **ChatGPT Work**
+local view sent real requests through Conduit and displayed model replies.
+Native web search was also exercised from the Work GUI.
+
+```bash
+# Official client, if it is not installed:
+brew install --cask chatgpt
+
+# From this checkout:
+./bin/cxg
+```
+
+Optionally install the short command without replacing an existing command:
+
+```bash
+ln -s "$PWD/bin/cxg" "$HOME/.local/bin/cxg"
+cxg
+```
+
+The proxy must already be running and the checkout's `.conduit-key` must match
+the proxy key. `cxg` launches the **unmodified official app**, not a replacement
+web chat. Select **ChatGPT Work** for local general work or **Codex** for the
+developer interface. Ordinary questions can also be asked in the Work view.
+
+### Isolation, credentials and permissions
+
+The launcher keeps its state separate:
+
+| Location | Purpose |
+|---|---|
+| `~/.codex-conduit-gui` | Dedicated model catalog, provider configuration and local sessions |
+| `~/Library/Application Support/Conduit ChatGPT` | Dedicated GUI preferences/browser state |
+| Checkout `.conduit-key` | Existing Conduit client key; not copied into config |
+
+The model provider uses Codex's supported command-backed authentication.
+`bin/conduit-auth-token --stdio-token` reads the key as data and supplies it
+only through the backend's private stdout pipe. The GUI configuration contains
+the helper path, not the key. This also works when Finder does not inherit
+terminal environment variables.
+
+Existing personal Codex configuration, login and GUI state are not replaced.
+Existing settings in the dedicated managed profile, including user-added MCP
+configuration, are preserved on subsequent launches. Unmanaged or conflicting
+profile directories are rejected, not silently overwritten.
+
+New GUI profiles default to Astra, max reasoning, detailed reasoning summaries,
+872,000 usable context tokens and live search, with **on-request approvals and
+workspace-write sandboxing**. This is
+deliberately different from the unrestricted `cx` preset. The launcher does
+not grant Accessibility, Screen Recording or other OS permissions.
+
+Environment overrides: `CONDUIT_GUI_APP_PATH`, `CONDUIT_GUI_HOME`,
+`CONDUIT_GUI_DATA_DIR`, and `CONDUIT_CODEX_BASE_URL`. Use dedicated directories;
+do not point the GUI profile at your existing `~/.codex`.
+
+### Verified behavior and current UI caveats
+
+- The GUI's Work conversation was matched to an HTTP 200 Conduit
+  `/v1/responses` request, with `model_provider=conduit` and originator
+  `codex_work_desktop`. The Codex view was independently exercised.
+- Actual GUI session records confirmed `gpt-6-astra`, effort **max** and a
+  usable context window of **872000**.
+- The Work GUI performed native `web_search_call` search/open-page actions
+  and displayed the official source URL.
+- In desktop 26.915.31945, the reasoning button may show **Medium / 中**
+  for this custom provider even while the backend uses **max**. This is not
+  inferred from the label: the actual session context was inspected.
+  Manually moving the UI intensity control can set a lower explicit effort.
+  The app's visible slider currently only exposes low/medium/high/xhigh.
+- The current custom-provider interface presents **ChatGPT Work** and
+  **Codex**. This setup does not reroute hosted ChatGPT Chat, web/cloud Work,
+  account-managed connectors, or cloud-only features through Copilot.
+- Desktop Computer Use and other advanced plugins require their own support
+  and OS permissions; they are not claimed as verified merely because text
+  and native web search work.
+
+### `@Computer`: setup and current verification boundary
+
+The desktop plugin is **not** the hosted Responses `computer` /
+`computer_use_preview` tool rejected in the earlier API probes. The official
+local plugin calls a native helper through `cua_repl` and can request access to
+individual apps.
+
+In **Plugins > Computer Use**, install/enable the plugin and its skill, then
+use **Try now** or mention `@Computer`. In the current desktop build the
+managed unified `cua_repl` path is used; an older direct `computer-use` MCP
+entry can be disabled by the app during startup and is not the authoritative
+indicator for that unified path. Then follow the
+normal macOS permission flow for **Codex Computer Use / ChatGPT Computer Use**:
+
+1. Enable **Accessibility** in System Settings > Privacy & Security.
+2. Enable **Screen Recording / Screen & System Audio Recording** for the same
+   helper. Follow any system request to quit and reopen it.
+3. Approve only the target application when the Work conversation asks.
+
+These system permissions are separate from the in-chat app approval and from
+Codex's shell sandbox. Do not edit TCC databases, disable OS protections, or
+grant every application access as a workaround.
+
+**The full computer-operation loop is not yet verified on this machine.**
+The actual `@Computer` test initially hit a native-helper startup failure.
+An enabled legacy MCP entry also used a relative executable path with
+`cwd="."`, which resolved against the wrong directory and produced `ENOENT`.
+That separate missing-file issue was diagnosed with a private configuration
+backup. After resetting the Computer Use JS session, the managed plugin path
+reached per-app approval. Access was allowed only to a generated, harmless
+**Conduit Computer Test** window for that conversation.
+
+The native tool then explicitly reported **Accessibility and Screen Recording
+permissions still pending**, and no screenshot/type/click success marker was
+produced. User confirmation is required before repeating the test; this must
+not be reported as working merely because the plugin is installed.
+
+The app regenerates its legacy compatibility entry during startup. **Do not
+repeatedly force that disabled entry on as a fix for macOS permissions.**
+If deliberately using the legacy direct MCP path and encountering `ENOENT`,
+verify the installed helper before configuring absolute paths:
+
+```toml
+[mcp_servers.computer-use]
+command = "/Users/YOU/.codex-conduit-gui/computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient"
+args = ["mcp"]
+cwd = "/Users/YOU/.codex-conduit-gui/computer-use"
+enabled = true
+```
+
+The verified GUI route uses the app-managed plugin, not a custom replacement
+for native Computer Use. Preserve other plugin configuration and back up the
+dedicated config before manual changes. See
+[OpenAI's Computer Use setup and approval guide](https://learn.chatgpt.com/docs/computer-use).
+
+Normal `cxg` launches **do not enable a debugging port**. Temporary local
+inspection was used only to verify the real desktop UI, then removed for
+normal use. Using the stock app icon directly may select its ordinary profile;
+use `cxg` (or your dedicated Conduit GUI shortcut) for this isolated route.
+
+Official references:
+[custom providers](https://learn.chatgpt.com/docs/config-file/config-advanced#custom-model-providers),
+[authentication](https://learn.chatgpt.com/docs/auth#alternative-model-providers),
+[local Work/external-provider boundaries](https://learn.chatgpt.com/docs/amazon-bedrock).
+
+## Visible reasoning summaries
+
+Astra advertises `supports_reasoning_summary_parameter: true` in the Codex
+catalog and defaults to `model_reasoning_summary="detailed"`. The launcher uses
+that model-specific default instead of forcing every model to `none`; `cx`
+explicitly selects detailed summaries and `hide_agent_reasoning=false`.
+Models without verified summary support retain `none`.
+
+Summary selection is separate from reasoning effort. A real Astra `max`
+request with `summary: "auto"` returned reasoning usage but no readable summary,
+whereas `concise` returned `response.reasoning_summary_text.delta` events.
+These are provider-supplied summaries, not the complete private reasoning or
+decrypted reasoning history. They may arrive in bursts rather than token by token.
+
+The helper accepts explicit `auto`, `concise`, `detailed`, or `none` overrides
+for summary-capable models. Non-none overrides fail clearly when the current
+proxy catalog does not advertise support, rather than silently being omitted.
+These are the four selections in
+[Codex 0.155.1's configuration schema](https://github.com/openai/codex/blob/be2951ea34f0d295ed0becf97079f92fa5f6950e/codex-rs/core/config.schema.json):
+
+| Value | Requested output |
+|---|---|
+| `none` | No reasoning summary; does not disable reasoning effort |
+| `auto` | Let the upstream decide; a response may have no visible summary |
+| `concise` | A short reasoning summary |
+| `detailed` | A more detailed reasoning summary; the default for Astra |
+
+Both `concise` and `detailed` have returned streamed Astra summaries in live
+Responses checks. Detailed mode was echoed upstream and returned 2,254 summary
+characters on a synthetic coding task; a separate arithmetic request returned
+no summary. **No mode guarantees a summary on every response or a fixed length.**
+There is no `full` or `all` setting exposing complete internal reasoning.
+This enumeration is for Codex. The bundled Copilot SDK's `reasoningSummary`
+type explicitly lists `none`, `concise`, and `detailed`; omitting that SDK
+field results in automatic upstream summary selection.
+
+This default is confined to the Codex catalog and launchers. The general
+`/v1/responses` route still forwards caller-supplied `auto`, `concise`,
+`detailed`, `none`, omitted reasoning, and `reasoning: null` without rewriting
+them. Other models, Chat Completions, Messages, authentication, reasoning
+effort, context limits, and sandbox/approval settings are not changed by the
+summary default. An explicit `cx` summary/display override still takes
+precedence over the preset.
+
+```bash
+./bin/conduit-codex --model gpt-6-astra -- \
+  -c 'model_reasoning_summary="detailed"' -c 'hide_agent_reasoning=false'
+
+# Shorter summaries remain an explicit option:
+cx -c 'model_reasoning_summary="concise"'
+
+# Explicit opt-out; also works after the cx preset:
+cx -c 'model_reasoning_summary="none"'
+```
+
+Restart a proxy that is not watching source changes, then start a new Codex
+invocation to refresh its catalog. A previously running CLI session does not
+automatically acquire new settings. For plain `codex` without the launcher,
+set the same summary/display options in its own configuration and point
+`model_catalog_json` at the refreshed Conduit catalog.
+Existing `cxg` managed profiles are preserved on relaunch; set
+`model_reasoning_summary="detailed"` in their own configuration when upgrading
+an older profile. Refresh its catalog with `cxg` and start a new GUI session.
+
+### VS Code Copilot SDK sessions are a separate entry point
+
+These Codex settings do not configure VS Code's built-in Copilot SDK agent.
+The inspected VS Code 1.138.0 build applies its explicit `concise` summary
+option only to GPT-5.6 models, not Astra. Its session model-switch interface
+also forwards effort and context tier without forwarding `reasoningSummary`.
+Turning on that build's existing summary switch or opening another Astra chat
+therefore does not fix this omission.
+
+Astra and the bundled SDK can stream concise summaries when explicitly
+requested; this is a host integration limitation, not a lack of model support.
+The local installation was left unchanged: modifying its sealed JavaScript
+resources would invalidate the app's signature, and an already-running shared
+agent host would not pick up the change. Use the verified CLI path above until
+the VS Code host provides an appropriate summary setting for Astra.
 
 ## Astra: max effort, live search and an exact 872k client budget
 
@@ -274,6 +500,10 @@ form and returned screenshot. It does not change your personal MCP settings.
 # Proxy must already be running with the same key.
 bun run test:codex --model gpt-5.4-mini
 
+# Only visible reasoning summaries, plus the existing exact-budget assertion:
+bun run test:codex --model gpt-6-astra --reasoning-only \
+  --reasoning-effort max --context-budget 872000
+
 # Explicit max effort, exact runtime context budget and native web search:
 bun run test:codex --model gpt-6-astra \
   --reasoning-effort max --context-budget 872000 --web-search
@@ -348,11 +578,11 @@ Official ChatGPT Work and Codex share OpenAI usage limits, whereas inference
 through this proxy consumes the selected GitHub Copilot account's usage.
 Those entitlements are not automatically interchangeable.
 
-The shortcut's provider overrides apply to the CLI process it launches.
-Opening a GUI does not automatically inherit them. GUI access to browser,
-desktop, plugins or cloud environments is not supplied merely by proxying
-Responses. **GUI-to-Conduit/Copilot routing has not been validated here** and
-would require separate configuration and testing.
+The `cx` shortcut's overrides apply to its CLI process. The separate `cxg`
+launcher now configures and verifies the official desktop app's **local
+Work/Codex** route through Conduit. This does not supply all hosted ChatGPT,
+browser, desktop, plugin or cloud features merely by proxying Responses; see
+[the tested desktop scope above](#official-desktop-gui-through-conduit-macos).
 
 Sources: [OpenAI mode comparison](https://learn.chatgpt.com/docs/use-chatgpt),
 [Work and local/cloud execution](https://learn.chatgpt.com/docs/get-started-with-work),

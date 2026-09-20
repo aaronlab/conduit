@@ -40,4 +40,12 @@ describe("Codex provider configuration", () => {
     expect(overrides).toContain('web_search="disabled"')
     expect(overrides.join("\n")).not.toMatch(/sandbox|approval|dangerously|auth\.json|config\.toml/)
   })
+
+  it("requests detailed summaries for Astra instead of overriding the catalog with none", () => {
+    const model = createCodexCatalog([nativeModel("gpt-6-astra")]).models[0]!
+    const overrides = codexConfigOverrides("http://127.0.0.1:7133", "/private/models.json", model)
+    expect(overrides).toContain('model_reasoning_summary="detailed"')
+    expect(overrides).not.toContain('model_reasoning_summary="none"')
+    expect(overrides.join("\n")).not.toMatch(/model_reasoning_effort|model_context_window|approval|sandbox/)
+  })
 })

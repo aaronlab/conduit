@@ -66,7 +66,8 @@ model selection, web search, browser MCP setup, verified capabilities and
 troubleshooting.
 
 For a two-letter command, the optional [cx preset](./docs/CODEX.md#short-command-cx)
-launches Astra with max reasoning, an exact 872k usable budget and live search.
+launches Astra with max reasoning, detailed reasoning summaries, an exact 872k
+usable budget and live search.
 **It also disables Codex sandboxing and standard execution approvals.**
 Use it only when you explicitly want that trusted-project preset; the normal
 launcher above does not weaken permissions.
@@ -82,6 +83,22 @@ usable client budget**:
 This combination was verified on 2026-09-21. The budget is a Codex client
 setting, not a claim about an undocumented Copilot server tier or a full-window
 stress test. See the guide for the upstream limits and compaction threshold.
+Astra's catalog and launcher now request visible `detailed` reasoning summaries
+by default; this is separate from reasoning effort. Other models retain
+conservative summary defaults. See [reasoning summaries](./docs/CODEX.md#visible-reasoning-summaries).
+
+### Official desktop GUI
+
+The official ChatGPT desktop app's **local Work and Codex views** have also
+been verified through Conduit. On macOS, run:
+
+```bash
+./bin/cxg
+```
+
+It uses a separate private profile, preserves your existing login/settings,
+and keeps GUI approvals enabled. See [GUI setup and verified limitations](./docs/CODEX.md#official-desktop-gui-through-conduit-macos).
+Hosted ChatGPT Chat/cloud services are not implicitly rerouted.
 
 ### Claude Code
 

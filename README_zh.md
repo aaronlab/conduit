@@ -62,7 +62,7 @@ Codex 模型目录，再通过自定义 Responses provider 启动 Codex。
 [Codex 专项说明](./docs/CODEX.md)。
 
 想用两个字母启动，可以安装 [cx 快捷入口](./docs/CODEX.md#short-command-cx)，之后在目标项目目录输入 `cx`。
-它预置 Astra、max、872k 可用预算和实时搜索，**也会关闭 Codex 沙箱及常规执行审批**；
+它预置 Astra、max、可见的 detailed 推理摘要、872k 可用预算和实时搜索，**也会关闭 Codex 沙箱及常规执行审批**；
 请仅在明确需要该权限配置的可信项目中使用，普通启动器不会自动降低权限限制。
 
 需要 **Astra + max 思考 + 实时联网搜索 + 精确 872k 可用上下文**时：
@@ -76,6 +76,21 @@ Codex 模型目录，再通过自定义 Responses provider 启动 Codex。
 Codex 运行时上下文为 `872000`。自动压缩阈值为 `784800`。
 这里的 872k 是客户端可用输入预算，不冒充 Copilot 的独立服务端档位；
 尚未做填满 872k tokens 的大输入压力测试。已有会话需要退出后用新命令启动。
+Astra 的目录与启动器默认请求 `detailed` 推理摘要；摘要开关与推理强度相互独立，
+显示的是上游提供的摘要，不是完整的内部推理。其他未经验证的模型保留 `none` 默认值。
+配置和验证命令见[推理摘要说明](./docs/CODEX.md#visible-reasoning-summaries)。
+
+### 使用官方图形界面
+
+已经通过官方 ChatGPT 桌面客户端验证了 **本地 Work 和 Codex 图形模式**：
+
+```bash
+./bin/cxg
+```
+
+它采用独立的私有配置，不覆盖你原有的登录和设置，GUI 默认保留审批。
+支持范围、界面推理标签的已知问题，以及网页登录/云端功能的区别，见
+[GUI 专项说明](./docs/CODEX.md#official-desktop-gui-through-conduit-macos)。
 
 ### 使用 Claude Code
 

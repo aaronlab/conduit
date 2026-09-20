@@ -6,13 +6,14 @@ import { fileURLToPath } from "node:url"
 import { isRecord } from "../packages/proxy/src/lib/validation"
 import { fetchCodexCatalog, parseCodexArguments, resolveConduitApiKey } from "../packages/proxy/src/lib/codex-cli"
 import { codexConfigOverrides, normalizeCodexBaseUrl } from "../packages/proxy/src/lib/codex-config"
-import { selectCodexModel, withCodexContextBudget } from "../packages/proxy/src/lib/codex-catalog"
+import { DEFAULT_CODEX_REASONING_SUMMARY, selectCodexModel, withCodexContextBudget } from "../packages/proxy/src/lib/codex-catalog"
 import { codexRuntimeContextWindow, hasMcpImage, isSuccessfulMcpCall } from "../packages/proxy/src/lib/codex-output"
 
 const args = process.argv.slice(2)
 if (args.includes("--help")) {
   console.log(`Usage: bun run test:codex [--model MODEL] [--base-url URL] [--browser]
                           [--reasoning-effort EFFORT] [--context-budget TOKENS] [--web-search]
+                          [--reasoning-only]
 
 Opt-in, billable integration tests against your running Conduit proxy.
 Uses a temporary Codex home/workspace; does not edit personal configuration.
@@ -20,6 +21,8 @@ Requires Codex 0.155.1 or compatible. --browser additionally requires Chrome
 and a cached Playwright MCP 0.0.82 (bunx @playwright/mcp@0.0.82 --help).
 Reasoning defaults to low when advertised. Explicit context budgets are verified
 against Codex runtime events; this is not a full-window capacity stress test.
+--reasoning-only checks nonempty visible summary items using the catalog default,
+without tool/browser/search tests. Select a verified summary model such as gpt-6-astra.
 
 Environment: CONDUIT_API_KEY (or repository .conduit-key), CODEX_BIN,
 CONDUIT_BASE_URL, CONDUIT_CODEX_MODEL, CONDUIT_CHROME_PATH.`)
@@ -30,12 +33,14 @@ let selectedModel = process.env.CONDUIT_CODEX_MODEL
 let baseUrl = process.env.CONDUIT_BASE_URL ?? "http://127.0.0.1:7133"
 let browser = false
 let webSearch = false
+let reasoningOnly = false
 let reasoningEffort: string | undefined
 let contextBudget: number | undefined
 for (let index = 0; index < args.length; index++) {
   const argument = args[index]
   if (argument === "--browser") browser = true
   else if (argument === "--web-search") webSearch = true
+  else if (argument === "--reasoning-only") reasoningOnly = true
   else if (argument === "--model" || argument === "--base-url" || argument === "--reasoning-effort" || argument === "--context-budget") {
     const value = args[++index]
     if (!value || value.startsWith("--")) throw new Error(`${argument} requires a value.`)
@@ -45,6 +50,7 @@ for (let index = 0; index < args.length; index++) {
     else contextBudget = parseCodexArguments(["--context-budget", value]).contextBudget
   } else throw new Error(`Unknown option: ${argument}. Use --help.`)
 }
+if (reasoningOnly && (browser || webSearch)) throw new Error("--reasoning-only cannot be combined with --browser or --web-search.")
 
 const apiRoot = normalizeCodexBaseUrl(baseUrl)
 const apiKey = await resolveConduitApiKey(fileURLToPath(new URL("..", import.meta.url)), process.env)
@@ -67,6 +73,9 @@ if (contextBudget !== undefined) {
 }
 if (reasoningEffort !== undefined && !selected.supported_reasoning_levels.some(level => level.effort === reasoningEffort)) {
   throw new Error(`${selected.slug} does not advertise reasoning effort ${JSON.stringify(reasoningEffort)}.`)
+}
+if (reasoningOnly && (!selected.supports_reasoning_summary_parameter || selected.default_reasoning_summary !== DEFAULT_CODEX_REASONING_SUMMARY)) {
+  throw new Error(`${selected.slug} does not advertise the expected ${DEFAULT_CODEX_REASONING_SUMMARY} reasoning summary default.`)
 }
 const model = selected.slug
 
@@ -127,29 +136,46 @@ try {
   await writeFile(join(temporary, "models.json"), JSON.stringify(catalog), { mode: 0o600 })
   console.log(`Testing ${version.trim()} through Conduit with ${model}. Copilot usage charges may apply.`)
 
-  const tools = completedItems(await run(
-    "In this isolated test workspace, use the shell tool to print CONDUIT_SHELL_OK. " +
-    "Use apply_patch to create codex-smoke.txt containing exactly CONDUIT_PATCH_OK and a newline. " +
-    "Read the file using the shell to verify it. Do not use networking. " +
-    "Only after all steps succeed, reply with exactly CONDUIT_CODEX_OK.",
-  ))
-  assert(tools.some((item) => item.type === "command_execution" && item.exit_code === 0 && String(item.aggregated_output).includes("CONDUIT_SHELL_OK")),
-    "The shell tool was not successfully exercised.")
-  assert(tools.some((item) => item.type === "file_change" && item.status === "completed"), "apply_patch was not successfully exercised.")
-  assert.equal(await readFile(join(workspace, "codex-smoke.txt"), "utf8"), "CONDUIT_PATCH_OK\n")
-  assert(tools.some((item) => item.type === "agent_message" && String(item.text).trim() === "CONDUIT_CODEX_OK"))
-  console.log("PASS: shell, custom apply_patch, multi-turn tool outputs and file verification")
+  if (reasoningOnly) {
+    const items = completedItems(await run(
+      "Without using any tools, design a TypeScript concurrency limiter for async jobs. " +
+      "Run at most 3 jobs concurrently, preserve input order in the results, stop scheduling after " +
+      "the first rejection, wait for already-running jobs before rejecting, accept an AbortSignal, " +
+      "and avoid unhandled rejections during cancellation. Give the implementation and briefly " +
+      "explain its externally observable behavior. End your reply with the line CONDUIT_REASONING_OK outside any code block.",
+    ))
+    const summaries = items.filter(item => item.type === "reasoning" && typeof item.text === "string" && item.text.trim())
+    assert(summaries.length > 0, "Codex did not receive any nonempty visible reasoning summary items.")
+    assert(items.some(item => item.type === "agent_message" && typeof item.text === "string" && item.text.trim().endsWith("CONDUIT_REASONING_OK")),
+      "The reasoning probe did not produce a final answer.")
+    assert(items.every(item => item.type === "reasoning" || item.type === "agent_message"),
+      "The reasoning-only probe unexpectedly used tools.")
+    console.log(`PASS: ${summaries.length} visible Codex reasoning summary items with the catalog's ${selected.default_reasoning_summary} default`)
+  } else {
+    const tools = completedItems(await run(
+      "In this isolated test workspace, use the shell tool to print CONDUIT_SHELL_OK. " +
+      "Use apply_patch to create codex-smoke.txt containing exactly CONDUIT_PATCH_OK and a newline. " +
+      "Read the file using the shell to verify it. Do not use networking. " +
+      "Only after all steps succeed, reply with exactly CONDUIT_CODEX_OK.",
+    ))
+    assert(tools.some((item) => item.type === "command_execution" && item.exit_code === 0 && String(item.aggregated_output).includes("CONDUIT_SHELL_OK")),
+      "The shell tool was not successfully exercised.")
+    assert(tools.some((item) => item.type === "file_change" && item.status === "completed"), "apply_patch was not successfully exercised.")
+    assert.equal(await readFile(join(workspace, "codex-smoke.txt"), "utf8"), "CONDUIT_PATCH_OK\n")
+    assert(tools.some((item) => item.type === "agent_message" && String(item.text).trim() === "CONDUIT_CODEX_OK"))
+    console.log("PASS: shell, custom apply_patch, multi-turn tool outputs and file verification")
 
-  const schemaPath = join(temporary, "output-schema.json")
-  await writeFile(schemaPath, JSON.stringify({
-    type: "object", properties: { ok: { type: "boolean" }, value: { type: "integer" } },
-    required: ["ok", "value"], additionalProperties: false,
-  }))
-  const structured = completedItems(await run("Without using tools, return an object with ok true and value 42.", ["--output-schema", schemaPath]))
-  const answer = structured.findLast((item) => item.type === "agent_message" && typeof item.text === "string")
-  assert(answer && typeof answer.text === "string", "Missing structured response.")
-  assert.deepEqual(JSON.parse(answer.text), { ok: true, value: 42 })
-  console.log("PASS: Codex --output-schema")
+    const schemaPath = join(temporary, "output-schema.json")
+    await writeFile(schemaPath, JSON.stringify({
+      type: "object", properties: { ok: { type: "boolean" }, value: { type: "integer" } },
+      required: ["ok", "value"], additionalProperties: false,
+    }))
+    const structured = completedItems(await run("Without using tools, return an object with ok true and value 42.", ["--output-schema", schemaPath]))
+    const answer = structured.findLast((item) => item.type === "agent_message" && typeof item.text === "string")
+    assert(answer && typeof answer.text === "string", "Missing structured response.")
+    assert.deepEqual(JSON.parse(answer.text), { ok: true, value: 42 })
+    console.log("PASS: Codex --output-schema")
+  }
 
   if (webSearch) {
     const search = completedItems(await run(

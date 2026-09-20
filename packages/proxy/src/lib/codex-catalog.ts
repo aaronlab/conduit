@@ -1,10 +1,14 @@
 import type { Model } from "../services/copilot/get-models"
-import type { CodexCatalog, CodexModelInfo, CodexReasoningEffort, CodexVerifiedCapabilities } from "./codex-types"
+import type { CodexCatalog, CodexModelInfo, CodexReasoningEffort, CodexReasoningSummary, CodexVerifiedCapabilities } from "./codex-types"
 import { isRecord as record } from "./validation"
 
 export const CODEX_REASONING_EFFORTS: readonly CodexReasoningEffort[] = [
   "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra", "persistent",
 ]
+
+export const CODEX_REASONING_SUMMARIES: readonly CodexReasoningSummary[] = ["auto", "concise", "detailed", "none"]
+export const DEFAULT_CODEX_REASONING_SUMMARY: CodexReasoningSummary = "detailed"
+export const VERIFIED_REASONING_SUMMARY_MODELS: readonly string[] = ["gpt-6-astra"]
 
 export const VERIFIED_CODEX_BASELINE_MODEL = "gpt-5.4-mini"
 export const VERIFIED_HOSTED_SEARCH_MODEL = "gpt-5.6-sol"
@@ -28,6 +32,7 @@ export function verifiedCodexCapabilities(model: Model | undefined): CodexVerifi
     mcp_browser: baseline && model?.capabilities.supports.vision === true,
     structured_outputs: coding && model?.capabilities.supports.structured_outputs === true,
     hosted_web_search: nativeTools && model !== undefined && VERIFIED_HOSTED_SEARCH_MODELS.includes(model.id),
+    reasoning_summaries: nativeTools && model !== undefined && VERIFIED_REASONING_SUMMARY_MODELS.includes(model.id),
   }
 }
 
@@ -98,8 +103,8 @@ export function createCodexCatalog(models: readonly Model[]): CodexCatalog {
       upgrade: null,
       model_messages: { instructions_template: INSTRUCTIONS, instructions_variables: null },
       include_apps_usage_instructions: false,
-      supports_reasoning_summary_parameter: false,
-      default_reasoning_summary: "none",
+      supports_reasoning_summary_parameter: verified.reasoning_summaries,
+      default_reasoning_summary: verified.reasoning_summaries ? DEFAULT_CODEX_REASONING_SUMMARY : "none",
       support_verbosity: false,
       default_verbosity: null,
       // Generic tool metadata is insufficient; this native model passed live Codex custom-tool replay.
@@ -153,6 +158,10 @@ function reasoningEffort(value: unknown): value is CodexReasoningEffort {
   return typeof value === "string" && CODEX_REASONING_EFFORTS.some(effort => effort === value)
 }
 
+export function isCodexReasoningSummary(value: unknown): value is CodexReasoningSummary {
+  return typeof value === "string" && CODEX_REASONING_SUMMARIES.some(summary => summary === value)
+}
+
 function validModel(value: unknown): value is CodexModelInfo {
   if (!record(value)) return false
   const efforts = value.supported_reasoning_levels
@@ -171,7 +180,9 @@ function validModel(value: unknown): value is CodexModelInfo {
     && value.availability_nux === null && value.upgrade === null
     && record(messages) && typeof messages.instructions_template === "string" && messages.instructions_variables === null
     && value.include_apps_usage_instructions === false
-    && value.supports_reasoning_summary_parameter === false && value.default_reasoning_summary === "none"
+    && typeof value.supports_reasoning_summary_parameter === "boolean"
+    && isCodexReasoningSummary(value.default_reasoning_summary)
+    && (value.supports_reasoning_summary_parameter || value.default_reasoning_summary === "none")
     && value.support_verbosity === false && value.default_verbosity === null
     && (value.apply_patch_tool_type === null || value.apply_patch_tool_type === "freeform")
     && record(policy) && policy.mode === "tokens" && positiveInteger(policy.limit)

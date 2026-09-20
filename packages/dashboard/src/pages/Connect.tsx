@@ -69,7 +69,8 @@ export function Connect() {
                     {model.reasoning_efforts.length > 0 ? ` · reasoning: ${model.reasoning_efforts.join(", ")}` : ""}
                   </span>
                   {(model.verified_capabilities.freeform_apply_patch
-                    || model.verified_capabilities.hosted_web_search) && (
+                    || model.verified_capabilities.hosted_web_search
+                    || model.verified_capabilities.reasoning_summaries) && (
                     <div style={{ marginTop: 4, color: "var(--text-secondary)", fontSize: 13 }}>
                       Live-verified:
                       {model.verified_capabilities.freeform_apply_patch ? " freeform apply_patch;" : ""}
@@ -77,6 +78,7 @@ export function Connect() {
                       {model.verified_capabilities.structured_outputs ? " strict JSON-schema output;" : ""}
                       {model.verified_capabilities.mcp_browser ? " MCP browser tools and screenshot replay;" : ""}
                       {model.verified_capabilities.hosted_web_search ? ' native Responses hosted web search with URL citations (opt in with web_search="live");' : ""}
+                      {model.verified_capabilities.reasoning_summaries ? ` visible reasoning summaries (default: ${model.default_reasoning_summary});` : ""}
                     </div>
                   )}
                 </div>

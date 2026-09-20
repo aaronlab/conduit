@@ -16,7 +16,7 @@ import { nativeModel } from "./codex-fixtures"
 
 const repoRoot = resolve(import.meta.dirname, "../../..")
 const execute = promisify(execFile)
-const catalog = createCodexCatalog([nativeModel(), nativeModel("gpt-5.5"), nativeModel("gpt-5.4-mini")])
+const catalog = createCodexCatalog([nativeModel(), nativeModel("gpt-5.5"), nativeModel("gpt-5.4-mini"), nativeModel("gpt-6-astra")])
 let directory: string
 let server: Server | undefined
 
@@ -72,7 +72,8 @@ describe("Codex launcher arguments and local key parsing", () => {
     ["--", "-c", "model_providers.conduit.wire_api=chat"],
     ["--", "-c", '"model_providers" . "conduit".wire_api=chat'],
     ["--", "-c", "model_catalog_json=other.json"],
-    ["--", "-c", "model_reasoning_summary=auto"],
+    ["--", "-c", "model_reasoning_summary=invalid"],
+    ["--", "-c", 'model_reasoning_summary=""'],
     ["--", "-c", "web_search=unknown-mode"],
   ])("fails on missing values or conflicting transport overrides %j", (...args) => {
     expect(() => parseCodexArguments(args)).toThrow()
@@ -87,6 +88,22 @@ describe("Codex launcher arguments and local key parsing", () => {
     expect(parseCodexArguments(["--", "--search", "exec", "Search"]).codexArgs).toEqual(["--search", "exec", "Search"])
     expect(parseCodexArguments(["--", "-c", 'web_search="live"', "exec", "Search"]).codexArgs)
       .toEqual(["-c", 'web_search="live"', "exec", "Search"])
+  })
+
+  it.each(["auto", "concise", "detailed", "none"])("allows the explicit reasoning summary mode %s", summary => {
+    const args = ["--model", "gpt-6-astra", "--", "-c", `model_reasoning_summary="${summary}"`, "exec", "Test"]
+    expect(parseCodexArguments(args)).toMatchObject({
+      model: "gpt-6-astra",
+      reasoningSummary: summary,
+      codexArgs: args.slice(3),
+    })
+  })
+
+  it("respects the last summary override and ignores positional prompt text", () => {
+    expect(parseCodexArguments(["--", "-cmodel_reasoning_summary=concise", "--config=model_reasoning_summary=none"]).reasoningSummary)
+      .toBe("none")
+    expect(parseCodexArguments(["--", "exec", "--", "-c", "model_reasoning_summary=invalid"]).reasoningSummary)
+      .toBeUndefined()
   })
 
   it("parses repository key assignments as data without evaluating shell syntax", () => {
@@ -221,6 +238,39 @@ describe("private atomic catalog cache and launcher", () => {
     expect(stderr.mock.calls.flat().join("")).not.toContain("never-print-test-key")
     expect(launch).not.toHaveBeenCalled()
     expect(await readdir(cache)).toHaveLength(1)
+  })
+
+  it("launches Astra with detailed summaries and preserves an explicit opt-out", async () => {
+    const launch = vi.fn(async (_executable: string, _args: string[], _env: Readonly<Record<string, string | undefined>>) => 0)
+    const options = {
+      repoRoot: directory,
+      env: { CONDUIT_API_KEY: "test-key", CONDUIT_CODEX_CACHE_DIR: resolve(directory, "cache") },
+      fetchImpl: async () => Response.json(catalog), launch,
+    }
+    expect(await runConduitCodex(["--model", "gpt-6-astra"], options)).toBe(0)
+    expect(launch.mock.calls[0]?.[1]).toContain('model_reasoning_summary="detailed"')
+    expect(await runConduitCodex(["--model", "gpt-6-astra", "--", "-c", 'model_reasoning_summary="none"'], options)).toBe(0)
+    expect(launch.mock.calls[1]?.[1].filter(arg => arg.startsWith("model_reasoning_summary=")))
+      .toEqual(['model_reasoning_summary="detailed"', 'model_reasoning_summary="none"'])
+  })
+
+  it("fails explicitly instead of silently omitting requested summaries for an unsupported or stale catalog", async () => {
+    const launch = vi.fn()
+    const stderr = vi.fn()
+    const options = {
+      repoRoot: directory, env: { CONDUIT_API_KEY: "test-key" },
+      fetchImpl: async () => Response.json(catalog), launch, stderr,
+    }
+    expect(await runConduitCodex(["--model", "gpt-5.5", "--", "-c", 'model_reasoning_summary="concise"'], options)).toBe(1)
+    expect(stderr).toHaveBeenLastCalledWith(expect.stringContaining("does not advertise reasoning summaries"))
+    const stale = createCodexCatalog([nativeModel("gpt-6-astra")])
+    stale.models[0]!.supports_reasoning_summary_parameter = false
+    stale.models[0]!.default_reasoning_summary = "none"
+    expect(await runConduitCodex(["--model", "gpt-6-astra", "--", "-c", 'model_reasoning_summary="concise"'], {
+      ...options, fetchImpl: async () => Response.json(stale),
+    })).toBe(1)
+    expect(stderr).toHaveBeenLastCalledWith(expect.stringContaining("restart an outdated proxy"))
+    expect(launch).not.toHaveBeenCalled()
   })
 
   it("reports a missing Codex executable clearly after validating the fetched catalog", async () => {

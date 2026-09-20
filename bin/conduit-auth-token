@@ -1,0 +1,15 @@
+#!/usr/bin/env bun
+import { fileURLToPath } from "node:url"
+import { resolveConduitApiKey } from "../packages/proxy/src/lib/codex-cli.ts"
+
+if (process.argv[2] !== "--stdio-token" || process.argv.length !== 3 || process.stdout.isTTY) {
+  console.error("This helper supplies Conduit's local key only to a private provider-auth pipe.")
+  process.exit(2)
+}
+try {
+  const root = fileURLToPath(new URL("..", import.meta.url))
+  process.stdout.write(await resolveConduitApiKey(root, {}) + "\n")
+} catch {
+  console.error("Cannot read Conduit's local key. Check the checkout's .conduit-key and file permissions.")
+  process.exitCode = 1
+}

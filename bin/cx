@@ -1,13 +1,14 @@
 #!/usr/bin/env bun
 import { fileURLToPath } from "node:url"
 import { runConduitCodex } from "../packages/proxy/src/lib/codex-cli.ts"
+import { DEFAULT_CODEX_REASONING_SUMMARY } from "../packages/proxy/src/lib/codex-catalog.ts"
 
 const args = process.argv.slice(2)
 if (args[0] === "--help" || args[0] === "-h") {
   console.log(`Usage: cx [Codex arguments...]
 
-Conduit shortcut: gpt-6-astra, max reasoning, 872000 usable context tokens,
-live web search, and no Codex sandbox or standard execution approvals.
+Conduit shortcut: gpt-6-astra, max reasoning, ${DEFAULT_CODEX_REASONING_SUMMARY} reasoning summaries,
+872000 usable context tokens, live web search, and no Codex sandbox or standard execution approvals.
 
 WARNING: This intentionally uses --dangerously-bypass-approvals-and-sandbox.
 Use only in trusted projects. It does not grant OS/root permissions.
@@ -30,6 +31,8 @@ process.exitCode = await runConduitCodex([
   "--",
   "--dangerously-bypass-approvals-and-sandbox",
   "-c", 'model_reasoning_effort="max"',
+  "-c", `model_reasoning_summary=${JSON.stringify(DEFAULT_CODEX_REASONING_SUMMARY)}`,
+  "-c", "hide_agent_reasoning=false",
   "-c", 'web_search="live"',
   ...args,
 ], {

@@ -9,6 +9,8 @@ export type CodexReasoningEffort =
   | "ultra"
   | "persistent"
 
+export type CodexReasoningSummary = "auto" | "concise" | "detailed" | "none"
+
 // ModelInfo in Codex 0.155.1, protocol/src/openai_models.rs at be2951ea.
 export interface CodexModelInfo {
   slug: string
@@ -27,8 +29,8 @@ export interface CodexModelInfo {
     instructions_variables: null
   }
   include_apps_usage_instructions: false
-  supports_reasoning_summary_parameter: false
-  default_reasoning_summary: "none"
+  supports_reasoning_summary_parameter: boolean
+  default_reasoning_summary: CodexReasoningSummary
   support_verbosity: false
   default_verbosity: null
   apply_patch_tool_type: "freeform" | null
@@ -63,6 +65,7 @@ export interface CodexConnectionModel {
   name: string
   context_window: number
   reasoning_efforts: CodexReasoningEffort[]
+  default_reasoning_summary: CodexReasoningSummary
   vision: boolean
   parallel_tool_calls: boolean
   structured_outputs: boolean
@@ -75,6 +78,7 @@ export interface CodexVerifiedCapabilities {
   mcp_browser: boolean
   structured_outputs: boolean
   hosted_web_search: boolean
+  reasoning_summaries: boolean
 }
 
 export interface ConnectionInfo {
@@ -93,7 +97,7 @@ export interface ConnectionInfo {
     provider: CodexProviderConfig
     catalog_url: string
     default_model: string | null
-    model_reasoning_summary: "none"
+    model_reasoning_summary: CodexReasoningSummary
     web_search: "disabled"
     models: CodexConnectionModel[]
     limitations: string[]

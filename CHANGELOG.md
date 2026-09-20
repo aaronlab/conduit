@@ -5,6 +5,11 @@ All notable changes to Conduit are documented here. Format follows [Keep a Chang
 ## [Unreleased]
 
 ### Added
+- Verified official ChatGPT desktop local Work/Codex integration through
+  Conduit, with the `cxg` launcher, isolated state, private command-backed
+  authentication and preserved existing GUI/user settings.
+- Actual GUI text and native-search checks; recorded Astra max effort and
+  872k runtime context independently of the desktop's imperfect reasoning label.
 - Opt-in `cx` shortcut for the Astra/max/872k/live-search preset, including the
   explicitly requested sandbox/approval bypass; tested argument and working-directory
   preservation through a PATH symlink. The normal launcher remains unchanged.
@@ -42,6 +47,9 @@ All notable changes to Conduit are documented here. Format follows [Keep a Chang
 - **`ck-` prefixed API keys were unconditionally rejected** as "DB keys not yet implemented". Removed the dead branch — now any `CONDUIT_API_KEY` string works, prefix or no.
 
 ### Changed
+- Astra's Codex catalog, `cx`, and new `cxg` profiles default to `detailed`
+  reasoning summaries. Explicit overrides, other model defaults, reasoning
+  effort, context budgets, and permissions are preserved.
 - Removed automatic request-content diagnostic dumps and lossy truncation of
   large historical tool outputs.
 - Documented tested limitations: no native Copilot computer tools, no

@@ -31,7 +31,7 @@ describe("Copilot Responses transport", () => {
         { type: "custom_tool_call_output", call_id: "patch", output: "applied" },
       ],
       tools: [{ type: "custom", name: "apply_patch", format: { type: "grammar", syntax: "lark", definition: "start: TEXT" } }],
-      reasoning: { effort: "high" },
+      reasoning: { effort: "high", summary: "concise" },
       include: ["reasoning.encrypted_content"],
       store: false,
       client_metadata: { client: "codex" },

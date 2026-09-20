@@ -31,6 +31,7 @@ describe("cx shortcut", () => {
     })
     expect(stdout).toContain("gpt-6-astra")
     expect(stdout).toContain("max reasoning")
+    expect(stdout).toContain("detailed reasoning summaries")
     expect(stdout).toContain("872000")
     expect(stdout).toContain("live web search")
     expect(stdout).toContain("--dangerously-bypass-approvals-and-sandbox")
@@ -38,7 +39,11 @@ describe("cx shortcut", () => {
     expect(stderr).toBe("")
   })
 
-  it("preserves cwd, all requested settings and extra arguments when launched through a symlink", async () => {
+  it.each([
+    { label: "default summaries", extra: [], summary: "detailed", hidden: "false" },
+    { label: "explicit concise summaries", extra: ["-c", 'model_reasoning_summary="concise"'], summary: "concise", hidden: "false" },
+    { label: "explicit summary opt-out", extra: ["-c", 'model_reasoning_summary="none"', "-c", "hide_agent_reasoning=true"], summary: "none", hidden: "true" },
+  ])("preserves cwd, permissions, budgets and arguments with $label through a symlink", async ({ extra, summary, hidden }) => {
     const workspace = join(root, "project with spaces")
     const home = join(root, "home")
     const cache = join(root, "cache")
@@ -67,7 +72,7 @@ describe("cx shortcut", () => {
     const address = server.address()
     if (!address || typeof address === "string") throw new Error("Mock catalog did not start.")
     const prompt = "Keep this literal: $(not-a-shell-command)"
-    const { stdout, stderr } = await execute("bun", [link, "exec", prompt], {
+    const { stdout, stderr } = await execute("bun", [link, ...extra, "exec", prompt], {
       timeout: 10_000, cwd: workspace,
       env: {
         PATH: process.env.PATH, HOME: root, CODEX_HOME: home, CODEX_BIN: mock,
@@ -81,6 +86,12 @@ describe("cx shortcut", () => {
     expect(await realpath(output.cwd)).toBe(await realpath(workspace))
     expect(output.args).toContain('model="gpt-6-astra"')
     expect(output.args).toContain('model_reasoning_effort="max"')
+    expect(output.args).toContain('model_reasoning_summary="detailed"')
+    expect(output.args).toContain("hide_agent_reasoning=false")
+    expect(output.args.filter(arg => arg.startsWith("model_reasoning_summary=")).at(-1))
+      .toBe(`model_reasoning_summary="${summary}"`)
+    expect(output.args.filter(arg => arg.startsWith("hide_agent_reasoning=")).at(-1))
+      .toBe(`hide_agent_reasoning=${hidden}`)
     expect(output.args).toContain('web_search="live"')
     expect(output.args).toContain("--dangerously-bypass-approvals-and-sandbox")
     expect(output.args).toContain("model_context_window=872000")
@@ -91,6 +102,8 @@ describe("cx shortcut", () => {
     const path: string = JSON.parse(setting!.slice("model_catalog_json=".length))
     const model = selectCodexModel(parseCodexCatalog(JSON.parse(await readFile(path, "utf8"))), "gpt-6-astra")
     expect(model.context_window * model.effective_context_window_percent / 100).toBe(872000)
+    expect(model.supports_reasoning_summary_parameter).toBe(true)
+    expect(model.default_reasoning_summary).toBe("detailed")
     expect(await readFile(join(home, "config.toml"), "utf8")).toBe('model_reasoning_effort="high"\n')
     expect(await readFile(join(home, "auth.json"), "utf8")).toBe('{"fixture":"preserve-login"}\n')
     expect(stdout + stderr).not.toContain("cx-fixture-key")

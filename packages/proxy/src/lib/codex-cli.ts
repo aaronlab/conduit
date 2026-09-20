@@ -3,9 +3,9 @@ import { createHash, randomUUID } from "node:crypto"
 import { chmod, lstat, mkdir, open, readFile, rename, rm } from "node:fs/promises"
 import { resolve } from "node:path"
 import { constants } from "node:os"
-import { parseCodexCatalog, selectCodexModel, withCodexContextBudget } from "./codex-catalog"
+import { DEFAULT_CODEX_REASONING_SUMMARY, isCodexReasoningSummary, parseCodexCatalog, selectCodexModel, withCodexContextBudget } from "./codex-catalog"
 import { CODEX_VERSION, DEFAULT_CODEX_BASE_URL, codexCatalogUrl, codexConfigOverrides, normalizeCodexBaseUrl } from "./codex-config"
-import type { CodexCatalog } from "./codex-types"
+import type { CodexCatalog, CodexReasoningSummary } from "./codex-types"
 
 type Environment = Readonly<Record<string, string | undefined>>
 type FetchCatalog = (url: string, init: RequestInit) => Promise<Response>
@@ -41,6 +41,9 @@ Deferred tool_search is enabled only for the verified baseline; configured MCP t
 require their normal approvals. No MCP servers or blanket tool approvals are installed.
 An explicit context budget avoids Codex's extra 5% headroom deduction and compacts at 90%.
 It is a client budget, not an undocumented Copilot API context-tier switch.
+Verified Astra reasoning summaries default to ${DEFAULT_CODEX_REASONING_SUMMARY}. Choose auto, concise, detailed,
+or none using -- -c 'model_reasoning_summary="${DEFAULT_CODEX_REASONING_SUMMARY}"'.
+Non-none summaries require a model that advertises summary support in the catalog.
 `
 
 interface CliOptions {
@@ -48,6 +51,7 @@ interface CliOptions {
   baseUrl: string
   model: string | undefined
   contextBudget?: number
+  reasoningSummary?: CodexReasoningSummary
   codexArgs: string[]
 }
 
@@ -57,7 +61,7 @@ function argumentValue(argv: readonly string[], index: number, name: string): st
   return value
 }
 
-function configString(value: string): string {
+function configString(value: string, key = "model"): string {
   const text = value.trim()
   if (text.startsWith('"')) {
     try {
@@ -69,11 +73,14 @@ function configString(value: string): string {
   } else if (/^[a-zA-Z0-9][a-zA-Z0-9._:/-]*$/.test(text)) {
     return text
   }
-  throw new Error("Could not parse the Codex model override; use --model MODEL.")
+  throw new Error(key === "model"
+    ? "Could not parse the Codex model override; use --model MODEL."
+    : `Could not parse the Codex ${key} override; use a quoted string.`)
 }
 
-function passthroughModel(argv: readonly string[], contextBudget?: number): string | undefined {
+function passthroughOptions(argv: readonly string[], contextBudget?: number): Pick<CliOptions, "model" | "reasoningSummary"> {
   let selected: string | undefined
+  let reasoningSummary: CodexReasoningSummary | undefined
   const choose = (value: string) => {
     if (!value) throw new Error("--model requires a value.")
     if (selected !== undefined && selected !== value) throw new Error("Conflicting explicit Codex model selections; specify one model.")
@@ -107,15 +114,17 @@ function passthroughModel(argv: readonly string[], contextBudget?: number): stri
       if (contextBudget !== undefined && ["model_context_window", "model_auto_compact_token_limit"].includes(key)) {
         throw new Error(`--context-budget manages ${key}; do not also pass a conflicting context override.`)
       }
-      if (key === "model_reasoning_summary" && configString(value) !== "none") {
-        throw new Error(`${key} is disabled for the Conduit Codex provider.`)
+      if (key === "model_reasoning_summary") {
+        const summary = configString(value, key)
+        if (!isCodexReasoningSummary(summary)) throw new Error("model_reasoning_summary must be auto, concise, detailed, or none.")
+        reasoningSummary = summary
       }
       if (key === "web_search" && !["disabled", "cached", "live", "indexed"].includes(configString(value))) {
         throw new Error("web_search must be disabled, cached, live, or indexed.")
       }
     }
   }
-  return selected
+  return { model: selected, ...(reasoningSummary !== undefined && { reasoningSummary }) }
 }
 
 export function parseCodexArguments(argv: readonly string[], env: Environment = {}): CliOptions {
@@ -147,13 +156,17 @@ export function parseCodexArguments(argv: readonly string[], env: Environment = 
     else break
   }
   const codexArgs = argv.slice(index)
-  const passedModel = passthroughModel(codexArgs, contextBudget)
-  if (explicitModel !== undefined && passedModel !== undefined && explicitModel !== passedModel) {
+  const passed = passthroughOptions(codexArgs, contextBudget)
+  if (explicitModel !== undefined && passed.model !== undefined && explicitModel !== passed.model) {
     throw new Error("Conflicting helper and Codex model selections; specify one model.")
   }
-  const model = explicitModel ?? passedModel ?? env.CONDUIT_CODEX_MODEL
+  const model = explicitModel ?? passed.model ?? env.CONDUIT_CODEX_MODEL
   if (model !== undefined && !model.trim()) throw new Error("--model requires a value.")
-  return { help: false, baseUrl: normalizeCodexBaseUrl(baseUrl), model, codexArgs, ...(contextBudget !== undefined && { contextBudget }) }
+  return {
+    help: false, baseUrl: normalizeCodexBaseUrl(baseUrl), model, codexArgs,
+    ...(contextBudget !== undefined && { contextBudget }),
+    ...(passed.reasoningSummary !== undefined && { reasoningSummary: passed.reasoningSummary }),
+  }
 }
 
 export function parseConduitKeyFile(text: string): string | null {
@@ -321,6 +334,9 @@ export async function runConduitCodex(argv: readonly string[], options: CodexLau
     const key = await resolveConduitApiKey(options.repoRoot, env)
     let catalog = await fetchCodexCatalog(args.baseUrl, key, options.fetchImpl ?? fetch)
     let model = selectCodexModel(catalog, args.model)
+    if (args.reasoningSummary !== undefined && args.reasoningSummary !== "none" && !model.supports_reasoning_summary_parameter) {
+      throw new Error(`The proxy catalog does not advertise reasoning summaries for ${model.slug}. Choose a verified summary model or use model_reasoning_summary="none"; restart an outdated proxy before retrying.`)
+    }
     if (args.contextBudget !== undefined) {
       model = withCodexContextBudget(model, args.contextBudget)
       const selectedModel = model

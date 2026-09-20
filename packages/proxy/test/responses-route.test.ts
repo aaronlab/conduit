@@ -83,6 +83,42 @@ describe("Responses HTTP route", () => {
       .toMatchObject({ status: "success", inputTokens: 4, outputTokens: 2 })
   })
 
+  it("preserves Astra's requested summary mode and forwards readable summary deltas", async () => {
+    vi.mocked(createResponses).mockResolvedValue(stream(
+      { type: "response.reasoning_summary_text.delta", delta: "Checking constraints." }, completion,
+    ))
+    const response = await post({
+      model: "gpt-6-astra", input: "Test", stream: true, reasoning: { effort: "max", summary: "concise" },
+    })
+    expect(response.status).toBe(200)
+    expect(createResponses).toHaveBeenCalledWith(expect.objectContaining({
+      model: "gpt-6-astra", reasoning: { effort: "max", summary: "concise" },
+    }), expect.any(Object))
+    const text = await response.text()
+    expect(text).toContain("event: response.reasoning_summary_text.delta")
+    expect(text).toContain('"delta":"Checking constraints."')
+    expect(text).toContain("event: response.completed")
+  })
+
+  it.each(["auto", "concise", "detailed", "none"])("preserves an explicit %s summary setting for every native Responses client", async summary => {
+    for (const model of ["gpt-6-astra", "gpt-5.6-sol", "other-native"]) {
+      vi.mocked(createResponses).mockResolvedValue({ id: "r", model, output: [] })
+      const reasoning = { effort: "high", summary }
+      const response = await post({ model, input: "Test", reasoning })
+      expect(response.status).toBe(200)
+      expect(createResponses).toHaveBeenLastCalledWith(expect.objectContaining({ model, reasoning }), expect.any(Object))
+    }
+  })
+
+  it("does not inject reasoning parameters into direct Responses requests", async () => {
+    for (const reasoning of [undefined, null, { effort: "max" }]) {
+      vi.mocked(createResponses).mockResolvedValue({ id: "r", model: "gpt-6-astra", output: [] })
+      const body = { model: "gpt-6-astra", input: "Test", ...(reasoning !== undefined && { reasoning }) }
+      expect((await post(body)).status).toBe(200)
+      expect(vi.mocked(createResponses).mock.lastCall?.[0]).toEqual(body)
+    }
+  })
+
   it("surfaces truncated streams as typed errors and never logs success", async () => {
     vi.mocked(createResponses).mockResolvedValue(stream({ type: "response.output_text.delta", delta: "partial" }))
     const text = await (await post({ model: "native", input: "hi", stream: true })).text()

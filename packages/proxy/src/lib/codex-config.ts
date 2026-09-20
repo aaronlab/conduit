@@ -1,5 +1,5 @@
 import type { CodexModelInfo, CodexProviderConfig } from "./codex-types"
-import { VERIFIED_CODEX_BASELINE_MODEL, VERIFIED_CODEX_CODING_MODELS, VERIFIED_HOSTED_SEARCH_MODELS } from "./codex-catalog"
+import { DEFAULT_CODEX_REASONING_SUMMARY, VERIFIED_CODEX_BASELINE_MODEL, VERIFIED_CODEX_CODING_MODELS, VERIFIED_HOSTED_SEARCH_MODELS, VERIFIED_REASONING_SUMMARY_MODELS } from "./codex-catalog"
 
 export const CODEX_VERSION = "0.155.1"
 export const DEFAULT_CODEX_BASE_URL = "http://127.0.0.1:7133/v1"
@@ -9,7 +9,8 @@ export const CODEX_LIMITATIONS = [
   `Freeform apply_patch is enabled for verified models: ${VERIFIED_CODEX_CODING_MODELS.join(", ")}. Deferred tool_search is enabled for the live-verified ${VERIFIED_CODEX_BASELINE_MODEL} baseline; other models retain ordinary local tools.`,
   `Native Responses hosted web search with URL citations was verified for ${VERIFIED_HOSTED_SEARCH_MODELS.join(", ")}; search is disabled by default and requires an explicit web_search override.`,
   "MCP browser automation is not native desktop control. Copilot rejected both computer and computer_use_preview tools; neither is advertised.",
-  "WebSockets, Responses Lite, and reasoning summaries are not advertised.",
+  `Visible reasoning summaries default to ${DEFAULT_CODEX_REASONING_SUMMARY} for verified models: ${VERIFIED_REASONING_SUMMARY_MODELS.join(", ")}. Unverified models retain none; summaries are not raw internal reasoning and are not guaranteed on every response.`,
+  "WebSockets and Responses Lite are not advertised.",
 ]
 
 export function normalizeCodexBaseUrl(value: string): string {
@@ -51,7 +52,7 @@ export function codexConfigOverrides(baseUrl: string, catalogPath: string, model
     `model_providers.conduit={ ${provider} }`,
     `model_catalog_json=${JSON.stringify(catalogPath)}`,
     `model=${JSON.stringify(model.slug)}`,
-    'model_reasoning_summary="none"',
+    `model_reasoning_summary=${JSON.stringify(model.default_reasoning_summary)}`,
     'web_search="disabled"',
   ]
 }

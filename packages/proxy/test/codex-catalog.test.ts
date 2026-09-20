@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { codexInputLimit, createCodexCatalog, parseCodexCatalog, selectCodexModel, verifiedCodexCapabilities } from "../src/lib/codex-catalog"
+import { CODEX_REASONING_SUMMARIES, codexInputLimit, createCodexCatalog, parseCodexCatalog, selectCodexModel, verifiedCodexCapabilities } from "../src/lib/codex-catalog"
 import type { Model } from "../src/services/copilot/get-models"
 import { nativeModel } from "./codex-fixtures"
 
@@ -119,6 +119,28 @@ describe("Codex 0.155.1 model catalog", () => {
     expect(createCodexCatalog([chatOnly]).models).toEqual([])
   })
 
+  it("defaults verified Astra summaries to detailed without advertising unverified models", () => {
+    const catalog = createCodexCatalog([nativeModel("gpt-6-astra"), nativeModel("gpt-5.4-mini"), nativeModel("unverified-native")])
+    expect(selectCodexModel(catalog, "gpt-6-astra")).toMatchObject({
+      supports_reasoning_summary_parameter: true,
+      default_reasoning_summary: "detailed",
+    })
+    for (const model of catalog.models.filter(model => model.slug !== "gpt-6-astra")) {
+      expect(model).toMatchObject({ supports_reasoning_summary_parameter: false, default_reasoning_summary: "none" })
+    }
+    expect(parseCodexCatalog(JSON.parse(JSON.stringify(catalog)))).toEqual(catalog)
+  })
+
+  it("exposes exactly the four supported Codex summary selections", () => {
+    expect(CODEX_REASONING_SUMMARIES).toEqual(["auto", "concise", "detailed", "none"])
+  })
+
+  it.each(["auto", "concise", "detailed", "none"])("accepts the supported summary mode %s", summary => {
+    const model = createCodexCatalog([nativeModel("gpt-6-astra")]).models[0]!
+    expect(parseCodexCatalog({ models: [{ ...model, default_reasoning_summary: summary }] }).models[0]?.default_reasoning_summary)
+      .toBe(summary)
+  })
+
   it("enables verified deferred tool_search independently of hosted web search", () => {
     const catalog = createCodexCatalog([nativeModel("gpt-5.4-mini"), nativeModel(), nativeModel("gpt-5.6-sol")])
     expect(catalog.models.find(model => model.slug === "gpt-5.4-mini")?.supports_search_tool).toBe(true)
@@ -134,6 +156,7 @@ describe("Codex 0.155.1 model catalog", () => {
       mcp_browser: true,
       structured_outputs: true,
       hosted_web_search: false,
+      reasoning_summaries: false,
     })
     expect(verifiedCodexCapabilities(nativeModel("gpt-5.6-sol"))).toEqual({
       freeform_apply_patch: true,
@@ -141,10 +164,12 @@ describe("Codex 0.155.1 model catalog", () => {
       mcp_browser: false,
       structured_outputs: true,
       hosted_web_search: true,
+      reasoning_summaries: false,
     })
     expect(verifiedCodexCapabilities(nativeModel("gpt-6-astra"))).toEqual({
       freeform_apply_patch: true, structured_outputs: true,
       tool_search: false, mcp_browser: false, hosted_web_search: true,
+      reasoning_summaries: true,
     })
     expect(Object.values(verifiedCodexCapabilities(nativeModel("untested-native"))).every(value => !value)).toBe(true)
   })
@@ -204,7 +229,9 @@ describe("Codex 0.155.1 model catalog", () => {
       { use_responses_lite: true },
       { supported_reasoning_levels: [{ effort: "unrecognized", description: "" }] },
       { experimental_supported_tools: ["computer"] },
-      { supports_reasoning_summary_parameter: true },
+      { supports_reasoning_summary_parameter: "true" },
+      { default_reasoning_summary: "concise" },
+      { supports_reasoning_summary_parameter: true, default_reasoning_summary: "invalid" },
     ]) {
       expect(() => parseCodexCatalog({ models: [{ ...model, ...patch }] })).toThrow("Malformed")
     }
