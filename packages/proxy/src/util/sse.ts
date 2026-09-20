@@ -1,208 +1,120 @@
-// ---------------------------------------------------------------------------
-// Unified SSE (Server-Sent Events) parsing module.
-// ---------------------------------------------------------------------------
+import { logger } from "./logger"
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-/** Low-level parsed line result. */
 export interface SSEEvent {
-  type: "data" | "event" | "done";
-  value: string;
+  type: "data" | "event" | "done"
+  value: string
 }
 
-/**
- * High-level SSE event object, compatible with Hono's SSEMessage.
- */
 export interface ServerSentEvent {
-  data: string;
-  event: string | null;
-  id: string | null;
-  retry: number | null;
+  data: string
+  event: string | null
+  id: string | null
+  retry: number | null
 }
-
-// ---------------------------------------------------------------------------
-// Low-level: line parser
-// ---------------------------------------------------------------------------
 
 export function parseSSELine(line: string): SSEEvent | null {
-  if (!line || line.startsWith(":")) {
-    return null;
+  const field = parseField(line.replace(/\r$/, ""))
+  if (!field) return null
+  if (field.field === "data") {
+    return { type: field.value === "[DONE]" ? "done" : "data", value: field.value }
   }
-
-  if (line.startsWith("data: [DONE]") || line === "data:[DONE]") {
-    return { type: "done", value: "[DONE]" };
-  }
-
-  if (line.startsWith("data:")) {
-    const value = line.startsWith("data: ") ? line.slice(6) : line.slice(5);
-    return { type: "data", value };
-  }
-
-  if (line.startsWith("event:")) {
-    const value = line.startsWith("event: ") ? line.slice(7) : line.slice(6);
-    return { type: "event", value };
-  }
-
-  return null;
+  if (field.field === "event") return { type: "event", value: field.value }
+  return null
 }
-
-// ---------------------------------------------------------------------------
-// Low-level: stream parser (yields raw data strings)
-// ---------------------------------------------------------------------------
 
 export async function* parseSSEStream(
   stream: ReadableStream<Uint8Array>,
 ): AsyncGenerator<string | null> {
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  const reader = stream.getReader();
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-
-      if (done) {
-        if (buffer.trim()) {
-          const event = parseSSELine(buffer.trim());
-          if (event?.type === "data") {
-            yield event.value;
-          } else if (event?.type === "done") {
-            yield null;
-          }
-        }
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-
-      const parts = buffer.split("\n\n");
-      buffer = parts.pop() ?? "";
-
-      for (const part of parts) {
-        const lines = part.split("\n");
-        for (const line of lines) {
-          const event = parseSSELine(line);
-          if (event?.type === "data") {
-            yield event.value;
-          } else if (event?.type === "done") {
-            yield null;
-          }
-        }
-      }
+  for await (const event of events(new Response(stream))) {
+    if (event.data === "[DONE]") {
+      yield null
+      return
     }
-  } finally {
-    reader.releaseLock();
+    yield event.data
   }
 }
 
-// ---------------------------------------------------------------------------
-// High-level: events(response) — full SSE event objects
-// ---------------------------------------------------------------------------
-
 function parseField(line: string): { field: string; value: string } | null {
-  const colonIdx = line.indexOf(":");
-  if (colonIdx === 0) return null;
-  if (colonIdx === -1) return { field: line, value: "" };
-  const field = line.slice(0, colonIdx);
-  let value = line.slice(colonIdx + 1);
-  if (value.startsWith(" ")) value = value.slice(1);
-  return { field, value };
+  if (!line || line.startsWith(":")) return null
+  const colon = line.indexOf(":")
+  if (colon === -1) return { field: line, value: "" }
+  let value = line.slice(colon + 1)
+  if (value.startsWith(" ")) value = value.slice(1)
+  return { field: line.slice(0, colon), value }
 }
 
-export async function* events(
-  response: Response,
-): AsyncGenerator<ServerSentEvent> {
-  if (!response.body) return;
+export async function* events(response: Response): AsyncGenerator<ServerSentEvent> {
+  if (!response.body) throw new Error("Upstream SSE response has no body.")
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+  let data: string[] = []
+  let eventType: string | null = null
+  let id: string | null = null
+  let retry: number | null = null
+  let finished = false
 
-  const decoder = new TextDecoder();
-  const reader = response.body.getReader();
-  let buffer = "";
-
-  let data: string[] = [];
-  let eventType: string | undefined;
-  let id: string | undefined;
-  let retry: number | undefined;
-  let hasFields = false;
-
-  function buildEvent(): ServerSentEvent | null {
-    if (!hasFields) return null;
-    const event: ServerSentEvent = {
-      data: data.join("\n"),
-      event: eventType ?? null,
-      id: id ?? null,
-      retry: retry ?? null,
-    };
-    data = [];
-    eventType = undefined;
-    id = undefined;
-    retry = undefined;
-    hasFields = false;
-    return event;
+  function dispatch(): ServerSentEvent | null {
+    const event = data.length ? { data: data.join("\n"), event: eventType, id, retry } : null
+    data = []
+    eventType = null
+    return event
   }
 
   function processLine(line: string): ServerSentEvent | null {
-    if (line === "") {
-      return buildEvent();
+    if (line === "") return dispatch()
+    const parsed = parseField(line)
+    if (!parsed) return null
+    const { field, value } = parsed
+    if (field === "data") data.push(value)
+    else if (field === "event") eventType = value || null
+    else if (field === "id" && !value.includes("\0")) id = value
+    else if (field === "retry" && /^\d+$/.test(value) && Number.isSafeInteger(Number(value))) {
+      retry = Number(value)
     }
-    const parsed = parseField(line);
-    if (!parsed) return null;
-    const { field, value } = parsed;
-    switch (field) {
-      case "data":
-        hasFields = true;
-        data.push(value);
-        break;
-      case "event":
-        hasFields = true;
-        eventType = value;
-        break;
-      case "id":
-        hasFields = true;
-        id = value;
-        break;
-      case "retry": {
-        const n = Number.parseInt(value, 10);
-        if (!Number.isNaN(n)) {
-          hasFields = true;
-          retry = n;
-        }
-        break;
-      }
+    return null
+  }
+
+  function* drain(flush: boolean): Generator<ServerSentEvent> {
+    let start = 0
+    for (let index = 0; index < buffer.length; index++) {
+      const char = buffer[index]
+      if (char !== "\r" && char !== "\n") continue
+      // A CR at a chunk boundary may be the first half of CRLF.
+      if (char === "\r" && index === buffer.length - 1 && !flush) break
+      const event = processLine(buffer.slice(start, index))
+      if (event) yield event
+      if (char === "\r" && buffer[index + 1] === "\n") index++
+      start = index + 1
     }
-    return null;
+    buffer = buffer.slice(start)
+    if (flush && buffer) {
+      const event = processLine(buffer)
+      if (event) yield event
+      buffer = ""
+    }
   }
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
-
+      const { done, value } = await reader.read()
+      buffer += done ? decoder.decode() : decoder.decode(value, { stream: true })
+      yield* drain(done)
       if (done) {
-        if (buffer) {
-          const lines = buffer.split(/\r\n|\r|\n/);
-          for (const line of lines) {
-            const event = processLine(line);
-            if (event) yield event;
-          }
-        }
-        const event = buildEvent();
-        if (event) yield event;
-        break;
-      }
-
-      buffer += decoder.decode(value, { stream: true });
-
-      const lines = buffer.split(/\r\n|\r|\n/);
-      buffer = lines.pop() ?? "";
-
-      for (const line of lines) {
-        const event = processLine(line);
-        if (event) yield event;
+        finished = true
+        const event = dispatch()
+        if (event) yield event
+        return
       }
     }
   } finally {
-    reader.releaseLock();
+    if (!finished) {
+      try {
+        await reader.cancel()
+      } catch (error) {
+        logger.debug("SSE reader cleanup after an interrupted stream", { error: String(error) })
+      }
+    }
+    reader.releaseLock()
   }
 }

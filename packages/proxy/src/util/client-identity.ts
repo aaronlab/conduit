@@ -12,7 +12,11 @@ export function deriveClientIdentity(
   let clientVersion: string | null = null
 
   if (userAgent) {
-    if (userAgent.includes("claude-cli") || userAgent.includes("claude-code")) {
+    const codex = userAgent.match(/\bcodex(?:[-_]cli(?:_rs)?)?\/([^\s]+)/i)
+    if (codex) {
+      clientName = "codex"
+      clientVersion = codex[1] ?? null
+    } else if (userAgent.includes("claude-cli") || userAgent.includes("claude-code")) {
       const match = userAgent.match(/claude-cli\/(\S+)/)
       clientName = "claude-code"
       clientVersion = match?.[1] ?? null

@@ -1,0 +1,7 @@
+#!/usr/bin/env bun
+import { fileURLToPath } from "node:url"
+import { runConduitCodex } from "../packages/proxy/src/lib/codex-cli.ts"
+
+process.exitCode = await runConduitCodex(process.argv.slice(2), {
+  repoRoot: fileURLToPath(new URL("..", import.meta.url)),
+})

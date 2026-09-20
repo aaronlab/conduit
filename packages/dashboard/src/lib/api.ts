@@ -1,3 +1,7 @@
+import type { ConnectionInfo } from "../../../proxy/src/lib/codex-types"
+
+export type { ConnectionInfo } from "../../../proxy/src/lib/codex-types"
+
 const PROXY_URL = import.meta.env.VITE_PROXY_URL || ""
 const API_KEY = import.meta.env.VITE_API_KEY || ""
 
@@ -22,7 +26,7 @@ export const api = {
     return fetchApi(`/api/requests?${q}`)
   },
   getModels: () => fetchApi("/api/copilot/models"),
-  getConnectionInfo: () => fetchApi("/api/connection-info"),
+  getConnectionInfo: (): Promise<ConnectionInfo> => fetchApi("/api/connection-info"),
   getSettings: () => fetchApi("/api/settings"),
   getKeys: () => fetchApi("/api/keys"),
   getUpstreams: () => fetchApi("/api/upstreams"),

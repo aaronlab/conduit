@@ -1,8 +1,33 @@
 # Model Compatibility
 
-What each Claude model on Copilot actually supports. Based on live testing against `api.githubcopilot.com/v1/messages`.
+Copilot's model catalog is account- and policy-dependent. Refresh
+`/api/copilot/models?refresh=true` for the current list; a historical model
+name below does not guarantee current availability.
 
-## Summary
+## Codex / Responses (2026-09-20)
+
+See [CODEX.md](./CODEX.md) for the live test matrix and reproducible CLI checks.
+Codex requires native Responses, not the older Chat wire protocol.
+
+- The Codex catalog includes eligible models with `/responses` in their
+  supported endpoints; chat-only models are excluded instead of presented as
+  fully compatible.
+- Context/prompt limits, vision, parallel tools and reasoning choices come
+  from current Copilot metadata. Declared limits are not stress-test results.
+- HTTP/SSE preserves custom tools, tool-output images and opaque reasoning.
+- Sol native web search and CLI browser automation via Playwright MCP were
+  tested. Native computer tools returned explicit upstream 400 errors.
+- Chat clients automatically bridge newly published Responses-only models,
+  rather than relying only on a fixed `gpt-5.5`/Sol name list.
+- Virtual `gpt-5.5-*` effort aliases remain authoritative. For a real model
+  name, an explicit Chat `reasoning_effort`, including `none`, is respected.
+  Sol's historical Chat default remains `max` only when no effort is supplied.
+
+## Historical Claude results
+
+The table below records earlier `/v1/messages` testing and existing shims.
+These model-specific maximum-input measurements were **not rerun** during the
+Codex update. Do not configure Codex's context window from this table.
 
 | Model | Passthrough | `effort` | `thinking` | Tools | Streaming | Tested max input |
 |---|---|---|---|---|---|---|
@@ -54,11 +79,12 @@ SDK-style model names (`claude-opus-4-6-20250820`) are mapped to Copilot IDs (`c
 
 ## How to test yourself
 
-Conduit's dashboard shows exactly what got sent to upstream and what came back — no guessing:
+Conduit's dashboard records request metadata and usage, not full private
+conversation/screenshot dumps:
 
 1. Send a request through Conduit
 2. Open `http://localhost:7023/logs`
-3. Click the row to see the full request body, response body, and token usage
+3. Inspect the requested/resolved model, status, error and token usage
 
 For programmatic access, query the SQLite DB directly:
 

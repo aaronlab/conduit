@@ -2,12 +2,42 @@ import { events } from "./../../util/sse"
 
 import { copilotHeaders, copilotBaseUrl } from "./../../lib/api-config"
 import { HTTPError } from "./../../lib/error"
+import {
+  chatToResponses,
+  responsesStreamToChat,
+  responsesToChat,
+  shouldBridgeToResponses,
+} from "./../../lib/responses-bridge"
 import { state } from "./../../lib/state"
 import { ensureFreshCopilotToken, forceCopilotTokenRefresh } from "./../../lib/token"
+import { createResponses } from "./create-responses"
+import type { ServerSentEvent } from "../../util/sse"
+import { copilotSessionHeaders, type CopilotRequestOptions } from "./request-options"
+
+export const createCompatibleChatCompletions = async (
+  payload: ChatCompletionsPayload,
+  options: CopilotRequestOptions = {},
+) => {
+  if (!shouldBridgeToResponses(payload.model)) {
+    return createChatCompletions(payload, options)
+  }
+
+  const upstream = await createResponses(chatToResponses(payload), options)
+  if (payload.stream) {
+    return responsesStreamToChat(
+      upstream as AsyncIterable<ServerSentEvent>,
+      payload.model,
+    )
+  }
+
+  return responsesToChat(upstream as Record<string, unknown>, payload.model)
+}
 
 export const createChatCompletions = async (
   payload: ChatCompletionsPayload,
+  options: CopilotRequestOptions = {},
 ) => {
+  options.signal?.throwIfAborted()
   await ensureFreshCopilotToken()
   if (!state.copilotToken) throw new Error("Copilot token not found")
 
@@ -27,16 +57,22 @@ export const createChatCompletions = async (
       method: "POST",
       headers: {
         ...copilotHeaders(state, enableVision),
+        ...copilotSessionHeaders(options.headers),
+        accept: payload.stream ? "text/event-stream" : "application/json",
         "X-Initiator": isAgentCall ? "agent" : "user",
       },
       body: JSON.stringify(payload),
+      ...(options.signal && { signal: options.signal }),
     })
 
   let response = await doFetch()
   if (response.status === 401) {
+    await response.body?.cancel()
+    options.signal?.throwIfAborted()
     await forceCopilotTokenRefresh()
     response = await doFetch()
   }
+  options.onResponse?.(response.headers)
 
   if (!response.ok) {
     throw await HTTPError.fromResponse("Failed to create chat completions", response)
@@ -133,6 +169,7 @@ export interface ChatCompletionsPayload {
   temperature?: number | null
   top_p?: number | null
   max_tokens?: number | null
+  max_completion_tokens?: number | null
   stop?: string | Array<string> | null
   n?: number | null
   stream?: boolean | null
@@ -141,7 +178,11 @@ export interface ChatCompletionsPayload {
   presence_penalty?: number | null
   logit_bias?: Record<string, number> | null
   logprobs?: boolean | null
-  response_format?: { type: "json_object" } | null
+  response_format?: {
+    type: "json_schema"
+    json_schema: { name: string; schema: Record<string, unknown>; strict?: boolean; description?: string }
+  } | { type: "json_object" } | null
+  parallel_tool_calls?: boolean
   seed?: number | null
   tools?: Array<Tool> | null
   tool_choice?:
@@ -155,7 +196,7 @@ export interface ChatCompletionsPayload {
   /**
    * Controls reasoning effort for o1/o3 style models.
    */
-  reasoning_effort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+  reasoning_effort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
 }
 
 export interface Tool {
@@ -164,6 +205,7 @@ export interface Tool {
     name: string
     description: string | null
     parameters: Record<string, unknown>
+    strict?: boolean
   }
 }
 

@@ -5,6 +5,8 @@
 
 export type RouteStrategy = "passthrough" | "translate"
 
+export const CLAUDE_FALLBACK_MODEL = "gpt-5.6-sol"
+
 /**
  * Determine routing strategy based on model name.
  * Claude models -> passthrough (Copilot natively supports Anthropic Messages API)
@@ -17,6 +19,26 @@ export function getRouteStrategy(model: string): RouteStrategy {
   }
   // All other models need Anthropic -> OpenAI translation
   return "translate"
+}
+
+/**
+ * Resolve Claude aliases, then fall back when Copilot has removed that Claude
+ * model from the current model list. Claude Code can hard-code Sonnet/Haiku for
+ * internal agents even when the main model is a non-Claude model.
+ */
+export function resolveModelName(
+  model: string,
+  availableModelIds: readonly string[] | null,
+  anthropicBeta?: string | null,
+): string {
+  const translated = translateModelName(model, anthropicBeta)
+  if (!translated.startsWith("claude-") || availableModelIds === null) {
+    return translated
+  }
+
+  const isAvailable = availableModelIds.includes(translated)
+  const fallbackIsAvailable = availableModelIds.includes(CLAUDE_FALLBACK_MODEL)
+  return !isAvailable && fallbackIsAvailable ? CLAUDE_FALLBACK_MODEL : translated
 }
 
 /**

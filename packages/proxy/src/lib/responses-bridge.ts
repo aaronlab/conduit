@@ -7,23 +7,31 @@
  * `/v1/chat/completions` requests for those models and silently bridge to
  * `/responses` upstream, then translate the answer back.
  *
- * Scope (intentionally minimal — covers ToonFlow / ai-sdk text generation):
- *   - text content (no images, no audio)
- *   - simple tool calls (function tools)
- *   - reasoning_effort passthrough
- *   - streaming + non-streaming
+ * Preserves text, images, function tools, reasoning effort and structured output.
+ * Unsupported content is rejected instead of silently dropping it.
  */
-import type { ChatCompletionsPayload, Tool } from "../services/copilot/create-chat-completions"
+import type { ChatCompletionsPayload, Message, Tool } from "../services/copilot/create-chat-completions"
 import type { ResponsesPayload } from "../services/copilot/create-responses"
 import type { ServerSentEvent } from "../util/sse"
+import { HTTPError, InvalidRequestError } from "./error"
+import { state } from "./state"
+import { decodeResponsesEvent, normalizeResponsesStream, responsesError } from "./responses-stream"
+import { isRecord } from "./validation"
+
+type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
 
 /** Models that must be routed through /responses instead of /chat/completions. */
 const RESPONSES_ONLY_MODELS = new Set<string>([
   "gpt-5.5",
+  "gpt-5.6-sol",
 ])
 
+const DEFAULT_MODEL_EFFORTS: Record<string, ReasoningEffort> = {
+  "gpt-5.6-sol": "max",
+}
+
 /** Optional aliases: virtual model id → {real model, default reasoning effort}. */
-const MODEL_ALIASES: Record<string, { model: string; effort: "low" | "medium" | "high" | "xhigh" | "minimal" }> = {
+const MODEL_ALIASES: Record<string, { model: string; effort: ReasoningEffort }> = {
   "gpt-5.5-low": { model: "gpt-5.5", effort: "low" },
   "gpt-5.5-medium": { model: "gpt-5.5", effort: "medium" },
   "gpt-5.5-high": { model: "gpt-5.5", effort: "high" },
@@ -31,13 +39,19 @@ const MODEL_ALIASES: Record<string, { model: string; effort: "low" | "medium" | 
 }
 
 export function shouldBridgeToResponses(model: string): boolean {
+  if (Object.hasOwn(MODEL_ALIASES, model)) return true
+  const { model: realModel } = resolveAlias(model)
+  const available = state.models?.data.find((candidate) => candidate.id === realModel)
+  if (available?.supported_endpoints) {
+    return available.supported_endpoints.includes("/responses")
+      && !available.supported_endpoints.includes("/chat/completions")
+  }
   if (RESPONSES_ONLY_MODELS.has(model)) return true
-  if (model in MODEL_ALIASES) return true
   return false
 }
 
-export function resolveAlias(model: string): { model: string; defaultEffort?: "low" | "medium" | "high" | "xhigh" | "minimal" } {
-  const a = MODEL_ALIASES[model]
+export function resolveAlias(model: string): { model: string; defaultEffort?: ReasoningEffort } {
+  const a = Object.hasOwn(MODEL_ALIASES, model) ? MODEL_ALIASES[model] : undefined
   if (a) return { model: a.model, defaultEffort: a.effort }
   return { model }
 }
@@ -58,25 +72,20 @@ export function chatToResponses(chat: ChatCompletionsPayload): ResponsesPayload 
 
     // tool result message → function_call_output item
     if (role === "tool") {
-      const text = typeof m.content === "string" ? m.content : extractTextFromParts(m.content)
+      if (!m.tool_call_id) throw new InvalidRequestError("A tool message requires tool_call_id.", "messages")
       input.push({
         type: "function_call_output",
-        call_id: m.tool_call_id ?? "",
-        output: text,
+        call_id: m.tool_call_id,
+        output: toResponseContent(m.content),
       })
       continue
     }
 
     // assistant message that contains tool_calls → emit text first (if any), then function_call items
     if (role === "assistant" && Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
-      const text =
-        typeof m.content === "string"
-          ? m.content
-          : Array.isArray(m.content)
-          ? extractTextFromParts(m.content)
-          : ""
-      if (text && text.length > 0) {
-        input.push({ role: "assistant", content: text })
+      const content = toResponseContent(m.content)
+      if (content.length > 0) {
+        input.push({ role: "assistant", content })
       }
       for (const tc of m.tool_calls) {
         input.push({
@@ -90,17 +99,9 @@ export function chatToResponses(chat: ChatCompletionsPayload): ResponsesPayload 
     }
 
     // plain message
-    let content: string
-    if (typeof m.content === "string") {
-      content = m.content ?? ""
-    } else if (Array.isArray(m.content)) {
-      content = extractTextFromParts(m.content)
-    } else {
-      content = ""
-    }
     input.push({
-      role: role as "user" | "assistant" | "system" | "developer",
-      content,
+      role,
+      content: toResponseContent(m.content),
     })
   }
 
@@ -112,8 +113,8 @@ export function chatToResponses(chat: ChatCompletionsPayload): ResponsesPayload 
   if (chat.stream) payload.stream = true
 
   // reasoning_effort → reasoning.effort
-  const effort = chat.reasoning_effort ?? defaultEffort
-  if (effort && effort !== "none") {
+  const effort = defaultEffort ?? chat.reasoning_effort ?? DEFAULT_MODEL_EFFORTS[realModel]
+  if (effort) {
     payload.reasoning = { effort }
   }
 
@@ -122,7 +123,14 @@ export function chatToResponses(chat: ChatCompletionsPayload): ResponsesPayload 
   if (typeof chat.top_p === "number") payload.top_p = chat.top_p
 
   // max_tokens → max_output_tokens
-  if (typeof chat.max_tokens === "number") payload.max_output_tokens = chat.max_tokens
+  const maxTokens = chat.max_completion_tokens ?? chat.max_tokens
+  if (typeof maxTokens === "number") payload.max_output_tokens = maxTokens
+  if (typeof chat.parallel_tool_calls === "boolean") payload.parallel_tool_calls = chat.parallel_tool_calls
+  if (chat.response_format?.type === "json_schema") {
+    payload.text = { format: { type: "json_schema", ...chat.response_format.json_schema } }
+  } else if (chat.response_format?.type === "json_object") {
+    payload.text = { format: { type: "json_object" } }
+  }
 
   // tools: chat shape {type:"function", function:{name,description,parameters}}
   //        → responses shape {type:"function", name, description, parameters}
@@ -132,6 +140,7 @@ export function chatToResponses(chat: ChatCompletionsPayload): ResponsesPayload 
       name: t.function.name,
       description: t.function.description ?? undefined,
       parameters: t.function.parameters,
+      ...(typeof t.function.strict === "boolean" && { strict: t.function.strict }),
     }))
   }
 
@@ -147,17 +156,23 @@ export function chatToResponses(chat: ChatCompletionsPayload): ResponsesPayload 
   return payload
 }
 
-function extractTextFromParts(parts: unknown): string {
-  if (!Array.isArray(parts)) return ""
-  return parts
-    .map((p: unknown) => {
-      if (typeof p !== "object" || p === null) return ""
-      const r = p as Record<string, unknown>
-      if (r.type === "text" && typeof r.text === "string") return r.text
-      // Drop image/audio parts silently — bridge is text-only for now.
-      return ""
-    })
-    .join("")
+function toResponseContent(content: Message["content"]): string | Array<Record<string, unknown>> {
+  if (content === null) return ""
+  if (typeof content === "string") return content
+  if (!Array.isArray(content)) throw new InvalidRequestError("Invalid message content.", "messages")
+  return content.map((part) => {
+    if (part?.type === "text" && typeof part.text === "string") {
+      return { type: "input_text", text: part.text }
+    }
+    if (part?.type === "image_url" && typeof part.image_url?.url === "string") {
+      return {
+        type: "input_image",
+        image_url: part.image_url.url,
+        ...(part.image_url.detail && { detail: part.image_url.detail }),
+      }
+    }
+    throw new InvalidRequestError("Only text and image_url content can be bridged to Responses.", "messages", "unsupported_content")
+  })
 }
 
 /**
@@ -167,6 +182,9 @@ export function responsesToChat(
   resp: Record<string, unknown>,
   requestedModel: string,
 ): unknown {
+  if (resp.status === "failed" || resp.error) {
+    throw new HTTPError(responsesError(resp) ?? "The upstream Responses request failed.", 502)
+  }
   const id = (resp.id as string) ?? `chatcmpl-bridge-${Date.now()}`
   const created = Math.floor(((resp.created_at as number) ?? Date.now() / 1000))
   const model = (resp.model as string) ?? requestedModel
@@ -200,6 +218,7 @@ export function responsesToChat(
   // map incomplete_details
   const incomplete = resp.incomplete_details as Record<string, unknown> | null
   if (incomplete && incomplete.reason === "max_output_tokens") finishReason = "length"
+  if (incomplete && incomplete.reason === "content_filter") finishReason = "content_filter"
 
   const usage = resp.usage as Record<string, unknown> | undefined
   const promptTokens = usage ? (usage.input_tokens as number) ?? 0 : 0
@@ -256,8 +275,11 @@ export async function* responsesStreamToChat(
   let model = requestedModel
   let roleSent = false
   let finishReason: "stop" | "length" | "tool_calls" | "content_filter" = "stop"
-  // tool calls indexed by item_id
-  const toolIndex = new Map<string, number>()
+  // Copilot rewrites/encrypts item_id independently in each SSE event, so it
+  // is not stable across added/delta/done. output_index is stable.
+  const toolIndex = new Map<number, number>()
+  const emittedToolArguments = new Map<number, string>()
+  const emittedText = new Map<string, string>()
   let nextToolIdx = 0
   let usageChunk: Record<string, unknown> | null = null
 
@@ -273,15 +295,65 @@ export async function* responsesStreamToChat(
     }
   }
 
-  for await (const ev of events) {
-    const evType = ev.event ?? ""
-    if (!ev.data) continue
-    let parsed: Record<string, unknown>
-    try {
-      parsed = JSON.parse(ev.data)
-    } catch {
-      continue
+  function completedArgumentsChunk(
+    outputIndex: number,
+    fullArguments: string,
+  ): { data: string } | null {
+    const idx = toolIndex.get(outputIndex)
+    if (idx === undefined || !fullArguments) return null
+
+    const emitted = emittedToolArguments.get(outputIndex) ?? ""
+    if (!fullArguments.startsWith(emitted)) {
+      throw new HTTPError("Upstream tool arguments disagree with previously streamed arguments.", 502)
     }
+
+    const remainder = fullArguments.slice(emitted.length)
+    if (!remainder) return null
+
+    emittedToolArguments.set(outputIndex, fullArguments)
+    return chunk({
+      tool_calls: [{ index: idx, function: { arguments: remainder } }],
+    })
+  }
+
+  function* startTool(outputIndex: number, item: Record<string, unknown>): Generator<{ data: string }> {
+    if (toolIndex.has(outputIndex)) return
+    if (typeof item.name !== "string" || typeof item.call_id !== "string") {
+      throw new HTTPError("Upstream function call is missing its name or call_id.", 502)
+    }
+    const idx = nextToolIdx++
+    const args = typeof item.arguments === "string" ? item.arguments : ""
+    toolIndex.set(outputIndex, idx)
+    emittedToolArguments.set(outputIndex, args)
+    if (!roleSent) {
+      yield chunk({ role: "assistant", content: "" })
+      roleSent = true
+    }
+    yield chunk({ tool_calls: [{
+      index: idx, id: item.call_id, type: "function",
+      function: { name: item.name, arguments: args },
+    }] })
+  }
+
+  function* emitText(outputIndex: number, contentIndex: number, text: string, complete: boolean): Generator<{ data: string }> {
+    const key = `${outputIndex}:${contentIndex}`
+    const emitted = emittedText.get(key) ?? ""
+    if (complete && !text.startsWith(emitted)) {
+      throw new HTTPError("Upstream text disagrees with previously streamed text.", 502)
+    }
+    const delta = complete ? text.slice(emitted.length) : text
+    if (!delta) return
+    emittedText.set(key, emitted + delta)
+    if (!roleSent) {
+      yield chunk({ role: "assistant", content: "" })
+      roleSent = true
+    }
+    yield chunk({ content: delta })
+  }
+
+  for await (const ev of normalizeResponsesStream(events)) {
+    const parsed = decodeResponsesEvent(ev)
+    const evType = parsed.type
 
     if (evType === "response.created" || evType === "response.in_progress") {
       const r = parsed.response as Record<string, unknown> | undefined
@@ -289,48 +361,36 @@ export async function* responsesStreamToChat(
       continue
     }
 
-    if (evType === "response.output_text.delta") {
-      const delta = (parsed.delta as string) ?? ""
-      if (!delta) continue
-      if (!roleSent) {
-        yield chunk({ role: "assistant", content: "" })
-        roleSent = true
-      }
-      yield chunk({ content: delta })
+    if (evType === "response.output_text.delta" || evType === "response.output_text.done") {
+      const complete = evType.endsWith(".done")
+      const text = complete ? parsed.text : parsed.delta
+      if (typeof text !== "string") throw new HTTPError("Invalid upstream output text.", 502)
+      yield* emitText(
+        typeof parsed.output_index === "number" ? parsed.output_index : 0,
+        typeof parsed.content_index === "number" ? parsed.content_index : 0,
+        text, complete,
+      )
       continue
     }
 
     if (evType === "response.output_item.added") {
       const item = parsed.item as Record<string, unknown> | undefined
       if (item && item.type === "function_call") {
-        const itemId = (item.id as string) ?? `tool_${nextToolIdx}`
-        const idx = nextToolIdx++
-        toolIndex.set(itemId, idx)
-        if (!roleSent) {
-          yield chunk({ role: "assistant", content: "" })
-          roleSent = true
-        }
-        yield chunk({
-          tool_calls: [
-            {
-              index: idx,
-              id: (item.call_id as string) ?? itemId,
-              type: "function",
-              function: {
-                name: (item.name as string) ?? "",
-                arguments: "",
-              },
-            },
-          ],
-        })
+        const outputIndex = parsed.output_index as number
+        yield* startTool(outputIndex, item)
       }
       continue
     }
 
     if (evType === "response.function_call_arguments.delta") {
-      const itemId = parsed.item_id as string
-      const idx = toolIndex.get(itemId) ?? 0
+      const outputIndex = parsed.output_index as number
+      const idx = toolIndex.get(outputIndex)
       const delta = (parsed.delta as string) ?? ""
+      if (idx === undefined || !delta) continue
+      emittedToolArguments.set(
+        outputIndex,
+        (emittedToolArguments.get(outputIndex) ?? "") + delta,
+      )
       yield chunk({
         tool_calls: [
           {
@@ -342,12 +402,52 @@ export async function* responsesStreamToChat(
       continue
     }
 
-    if (evType === "response.completed") {
+    if (evType === "response.function_call_arguments.done") {
+      const completed = completedArgumentsChunk(
+        parsed.output_index as number,
+        (parsed.arguments as string) ?? "",
+      )
+      if (completed) yield completed
+      continue
+    }
+
+    if (evType === "response.output_item.done") {
+      const item = parsed.item as Record<string, unknown> | undefined
+      if (item?.type === "function_call") {
+        yield* startTool(parsed.output_index as number, item)
+        const completed = completedArgumentsChunk(
+          parsed.output_index as number,
+          (item.arguments as string) ?? "",
+        )
+        if (completed) yield completed
+      } else if (item?.type === "message" && Array.isArray(item.content)) {
+        for (const [index, part] of item.content.entries()) {
+          if (isRecord(part) && part.type === "output_text" && typeof part.text === "string") {
+            yield* emitText(parsed.output_index as number, index, part.text, true)
+          }
+        }
+      }
+      continue
+    }
+
+    if (evType === "response.completed" || evType === "response.incomplete") {
       const r = parsed.response as Record<string, unknown> | undefined
       if (r) {
+        const output = (r.output as Array<Record<string, unknown>> | undefined) ?? []
+        for (const [outputIndex, item] of output.entries()) {
+          if (item.type !== "function_call") continue
+          yield* startTool(outputIndex, item)
+          const completed = completedArgumentsChunk(
+            outputIndex,
+            (item.arguments as string) ?? "",
+          )
+          if (completed) yield completed
+        }
         const incomplete = r.incomplete_details as Record<string, unknown> | null
-        if (incomplete && incomplete.reason === "max_output_tokens") finishReason = "length"
         if (toolIndex.size > 0) finishReason = "tool_calls"
+        if (incomplete?.reason === "max_output_tokens") finishReason = "length"
+        else if (incomplete?.reason === "content_filter") finishReason = "content_filter"
+        else if (evType === "response.incomplete") throw new HTTPError(responsesError(parsed) ?? "Incomplete response.", 502)
         const usage = r.usage as Record<string, unknown> | undefined
         if (usage) {
           usageChunk = {
@@ -384,15 +484,7 @@ export async function* responsesStreamToChat(
     }
 
     if (evType === "response.failed" || evType === "error") {
-      // Surface as an error chunk; client will see truncated stream.
-      const errMsg =
-        ((parsed.error as Record<string, unknown> | undefined)?.message as string) ?? "responses stream failed"
-      yield {
-        data: JSON.stringify({
-          error: { message: errMsg, type: "error" },
-        }),
-      }
-      return
+      throw new HTTPError(responsesError(parsed) ?? "The upstream Responses stream failed.", 502)
     }
   }
 }

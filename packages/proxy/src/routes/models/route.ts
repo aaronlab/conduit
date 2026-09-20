@@ -1,5 +1,6 @@
 import { Hono } from "hono"
 import { state } from "../../lib/state"
+import { createCodexCatalog } from "../../lib/codex-catalog"
 
 export const modelRoutes = new Hono()
 
@@ -13,6 +14,13 @@ const VIRTUAL_ALIASES = [
 ]
 
 modelRoutes.get("/", (c) => {
+  if (c.req.query("client_version") !== undefined) {
+    if (!state.models) {
+      return c.json({ error: { message: "Copilot model metadata is not available yet.", type: "model_catalog_unavailable" } }, 503)
+    }
+    return c.json(createCodexCatalog(state.models.data))
+  }
+
   const real =
     state.models?.data.map((model) => ({
       id: model.id,

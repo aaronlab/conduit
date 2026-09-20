@@ -2,13 +2,14 @@
   "name": "conduit",
   "version": "1.0.0",
   "private": true,
-  "description": "GitHub Copilot API reverse proxy with native Anthropic Messages API passthrough",
+  "description": "GitHub Copilot gateway for Codex Responses, Claude Messages and OpenAI Chat Completions",
   "workspaces": ["packages/*"],
   "scripts": {
     "dev": "bun run --filter '*' dev",
     "dev:proxy": "bun run --filter @conduit/proxy dev",
     "dev:dashboard": "bun run --filter dashboard dev",
     "test": "bun run --filter @conduit/proxy test",
+    "test:codex": "bun run scripts/test-codex.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

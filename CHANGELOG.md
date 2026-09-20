@@ -4,13 +4,39 @@ All notable changes to Conduit are documented here. Format follows [Keep a Chang
 
 ## [Unreleased]
 
+### Added
+- Codex 0.155.1 integration, a capability-aware native Responses catalog,
+  a non-destructive launcher, dashboard setup instructions and a dedicated
+  Codex guide.
+- Opt-in real Codex smoke tests for shell, custom `apply_patch`, multi-turn
+  results, strict JSON output and isolated Playwright MCP browser/image use.
+- Responses envelope, SSE, cancellation, error, model-routing, multimodal
+  bridge and Anthropic search regression coverage.
+
 ### Fixed
+- Responses streams now handle fragmented UTF-8/CRLF, completed output items,
+  explicit terminal errors and client cancellation. EOF alone is not success.
+- Image and agent-request classification now includes custom/function tool
+  results, native screenshot shapes and continuation history.
+- Structured upstream error codes and retry hints are preserved.
+- Newly published Responses-only models are detected using Copilot metadata.
+  The Chat bridge preserves image input/results, strict tools and JSON schema.
+- Chat streams no longer duplicate `[DONE]` or log interrupted streams as
+  successful requests.
+- Claude search translation retains representable filters, location and use
+  limits, and no longer reports a failed/not-performed search as success.
+- Codex client identity is recognized in request logs.
 - **Stream timeouts on long `thinking` responses.** Bun's default `idleTimeout` is 10s, which was killing Opus 4.7 streams whenever the model paused to think. Raised to 255s (Bun max).
 - **`thinking.type: "enabled"` rejected by Opus 4.7.** The SDK sends `enabled` but Copilot's Opus 4.7 requires `adaptive`. Conduit now auto-rewrites the request and derives `output_config.effort` from `budget_tokens` if the caller didn't set one.
 - **Per-model `effort` whitelist 400s.** Opus 4.7 only accepts `medium`; Haiku 4.5 doesn't support `effort` at all. Conduit now clamps or strips before forwarding instead of letting the 400 propagate to the client.
 - **`ck-` prefixed API keys were unconditionally rejected** as "DB keys not yet implemented". Removed the dead branch — now any `CONDUIT_API_KEY` string works, prefix or no.
 
 ### Changed
+- Removed automatic request-content diagnostic dumps and lossy truncation of
+  large historical tool outputs.
+- Documented tested limitations: no native Copilot computer tools, no
+  fabricated remote compaction, HTTP/SSE rather than WebSockets, and no
+  unsupported chat-only models in the Codex catalog.
 - **README rewritten** around the "run Claude Code Opus 4.7 via your Copilot subscription" use case. Added `README_zh.md` (Chinese).
 - **New docs/** — `MODEL_COMPATIBILITY.md`, `ARCHITECTURE.md`, `FAQ.md`.
 

@@ -2,9 +2,25 @@
 
 ## Is this legal? Will my Copilot get banned?
 
-Conduit uses the same Copilot API endpoints that GitHub's own VS Code extension uses. The OAuth Device Flow is the same flow `gh auth login` uses. That said, GitHub's terms of service for Copilot forbid reselling the capacity — **use Conduit for your own personal coding, not as a paid service for others.**
+Conduit is an unofficial client of Copilot endpoints. Check the current GitHub
+terms and your organization's policies before use. Use only accounts and
+models you are authorized to access. This project cannot guarantee eligibility,
+continued API availability, or an account-policy outcome.
 
-At the time of writing (April 2026) there's no public case of an account being banned for local API use, but anyone using this accepts the residual risk.
+## Can I use the latest Codex CLI?
+
+Codex 0.155.1 was verified on 2026-09-20. Use `bin/conduit-codex` and the
+capability-aware Responses catalog, not `wire_api = "chat"`. See
+[the Codex guide](./CODEX.md) for setup and opt-in smoke tests.
+
+## Does Codex computer use work?
+
+The tested Copilot endpoint rejects native `computer` and
+`computer_use_preview` tools. Codex CLI browser automation via Playwright MCP
+was verified separately, including real navigation, form filling, clicking
+and image feedback. These are different protocols and execution environments.
+The proxy cannot turn an unavailable hosted computer service into a working
+desktop executor.
 
 ## Does this bypass Anthropic's rate limits?
 
@@ -16,10 +32,12 @@ That banner is a UI cache based on your last Anthropic login, not the live model
 
 ## Why do I keep getting `401 Invalid API key`?
 
-99% of the time: you have `ANTHROPIC_API_KEY` set in your shell. Claude Code treats that as "Anthropic direct mode" and ignores your `ANTHROPIC_BASE_URL`. Fix:
+Check that the client uses the same local key as the proxy. For Claude Code,
+avoid competing Anthropic credentials and configure the proxy explicitly:
 
 ```bash
 unset ANTHROPIC_API_KEY
+export ANTHROPIC_BASE_URL=http://127.0.0.1:7133
 export ANTHROPIC_AUTH_TOKEN=<your-conduit-key>
 ```
 
@@ -111,20 +129,33 @@ For other models the limit is lower (168K for most Sonnet/Opus 4.5+, 136K for Ha
 
 ## What about Anthropic's 200K / 400K / 1M pricing tiers?
 
-Copilot flat-rates the underlying inference as part of your subscription, so tier pricing doesn't apply here. You're paying GitHub, not Anthropic.
+Requests are billed by GitHub under your actual Copilot plan, not by an
+Anthropic/OpenAI API key. Do not assume unlimited or flat-rate inference:
+usage charges, quotas and model availability can change. Check the current
+GitHub billing information for your account before running large jobs.
 
 ## Streams get cut off on long `thinking` responses. What's going on?
 
 Bun's default HTTP idle timeout is 10 seconds. Conduit raises it to 255 (Bun's max). If you still see cut-offs, it's almost always the upstream (Copilot) silently killing slow streams — in which case retrying with a shorter `effort` or splitting the prompt usually fixes it.
 
-SSE keepalive (periodic `: keepalive\n\n` comments) is on the roadmap to make this fully bulletproof.
+SSE keepalive comments are now emitted every 15 seconds on the relevant
+streaming routes. They do not override Copilot's own timeouts. Interrupted
+Responses streams report an explicit error instead of a successful completion.
+
+## Why does a large Codex resume request fail instead of dropping screenshots?
+
+Conduit deliberately preserves all historical tool content. The older
+automatic truncation could remove important text as well as images.
+Compact/reduce the context in Codex or start a focused session if upstream
+returns 413. OpenAI remote `/responses/compact` is not emulated; use the
+Conduit provider's local-compaction path.
 
 ## How do I contribute?
 
 PRs welcome. Things that would actually help:
 
 - Tests for edge cases we've missed (report them as issues first)
-- SSE keepalive implementation
+- More model-specific Codex compatibility tests
 - DB-backed multi-tenant API keys
 - Better Cursor / Cline / Aider compatibility notes
 

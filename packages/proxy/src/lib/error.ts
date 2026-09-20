@@ -1,5 +1,6 @@
 import type { Context } from "hono"
 import type { ContentfulStatusCode } from "hono/utils/http-status"
+import { isRecord } from "./validation"
 
 /** Max upstream response body length persisted in logs / DB. */
 const MAX_BODY_LENGTH = 512
@@ -7,11 +8,13 @@ const MAX_BODY_LENGTH = 512
 export class HTTPError extends Error {
   status: number
   responseBody: string
+  headers: Headers
 
-  constructor(message: string, status: number, responseBody: string = "") {
+  constructor(message: string, status: number, responseBody: string = "", headers?: Headers) {
     super(message)
     this.status = status
     this.responseBody = responseBody
+    this.headers = new Headers(headers)
   }
 
   /**
@@ -22,8 +25,31 @@ export class HTTPError extends Error {
     message: string,
     response: Response,
   ): Promise<HTTPError> {
-    const body = await response.text().catch(() => "")
-    return new HTTPError(message, response.status, body)
+    let body: string
+    try {
+      body = await response.text()
+    } catch (error) {
+      body = `Could not read the upstream error response: ${error instanceof Error ? error.message : String(error)}`
+    }
+    return new HTTPError(message, response.status, body, response.headers)
+  }
+}
+
+export class InvalidRequestError extends HTTPError {
+  readonly code: string
+
+  constructor(message: string, param?: string, code = "invalid_request") {
+    super(message, 400, JSON.stringify({
+      error: { message, type: "invalid_request_error", code, ...(param && { param }) },
+    }))
+    this.code = code
+  }
+}
+
+export function forwardResponseHeaders(c: Context, headers: Headers): void {
+  for (const name of ["x-request-id", "x-codex-turn-state", "retry-after"]) {
+    const value = headers.get(name)
+    if (value !== null) c.header(name, value)
   }
 }
 
@@ -53,6 +79,18 @@ export async function forwardError(c: Context, error: unknown) {
   // This function only builds the HTTP response for the client.
 
   if (error instanceof HTTPError) {
+    forwardResponseHeaders(c, error.headers)
+    if (error.responseBody) {
+      let body: unknown
+      try {
+        body = JSON.parse(error.responseBody)
+      } catch (parseError) {
+        if (!(parseError instanceof SyntaxError)) throw parseError
+      }
+      if (isRecord(body) && isRecord(body.error)) {
+        return c.json(body, error.status as ContentfulStatusCode)
+      }
+    }
     return c.json(
       {
         error: {

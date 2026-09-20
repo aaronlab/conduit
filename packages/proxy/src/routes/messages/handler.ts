@@ -5,8 +5,8 @@ import { checkRateLimit } from "../../lib/rate-limit"
 import { state } from "../../lib/state"
 import { logEmitter } from "../../util/log-emitter"
 import { generateRequestId } from "../../util/id"
-import { extractErrorDetails, forwardError } from "../../lib/error"
-import { getRouteStrategy, translateModelName } from "../../lib/model-router"
+import { extractErrorDetails, forwardError, HTTPError, InvalidRequestError } from "../../lib/error"
+import { getRouteStrategy, resolveModelName } from "../../lib/model-router"
 import { passthroughToMessages } from "./passthrough"
 import {
   translateToOpenAI,
@@ -16,16 +16,29 @@ import {
   translateChunkToAnthropicEvents,
   translateErrorToAnthropicErrorEvent,
 } from "./stream-translation"
-import { createChatCompletions } from "../../services/copilot/create-chat-completions"
+import { createCompatibleChatCompletions } from "../../services/copilot/create-chat-completions"
+import { createResponses } from "../../services/copilot/create-responses"
 import type { AnthropicStreamState } from "./anthropic-types"
 import { deriveClientIdentity } from "../../util/client-identity"
 import { resolveProvider } from "../../lib/upstream-router"
+import { isRecord } from "../../lib/validation"
+import {
+  buildNativeWebSearchResponse,
+  buildNativeWebSearchPayload,
+  extractWebSearchQuery,
+  supportsNativeWebSearch,
+  webSearchResponseToSSE,
+} from "./web-search"
 
 export async function handleMessages(c: Context) {
   const startTime = performance.now()
   const requestId = generateRequestId()
 
-  await checkRateLimit(state)
+  try {
+    await checkRateLimit(state)
+  } catch (error) {
+    return forwardError(c, error)
+  }
 
   // Extract request metadata
   const anthropicBeta = c.req.header("anthropic-beta") ?? null
@@ -36,55 +49,29 @@ export async function handleMessages(c: Context) {
 
   // Read raw body for passthrough, parse for routing decision
   const rawBody = await c.req.text()
-  const payload = JSON.parse(rawBody) as { model: string; stream?: boolean; thinking?: { type: string }; output_config?: { effort: string }; [key: string]: unknown }
+  let payload: { model: string; stream?: boolean; [key: string]: unknown }
+  try {
+    const parsed: unknown = JSON.parse(rawBody)
+    if (!isRecord(parsed) || typeof parsed.model !== "string" || !parsed.model.trim() || !Array.isArray(parsed.messages)) {
+      throw new InvalidRequestError("A model string and messages array are required.")
+    }
+    if (parsed.stream !== undefined && typeof parsed.stream !== "boolean") {
+      throw new InvalidRequestError("stream must be a boolean.", "stream")
+    }
+    if (parsed.tools !== undefined && (!Array.isArray(parsed.tools) || parsed.tools.some((tool) => !isRecord(tool)))) {
+      throw new InvalidRequestError("tools must be an array of tool objects.", "tools")
+    }
+    payload = { ...parsed, model: parsed.model }
+    if (typeof parsed.stream === "boolean") payload.stream = parsed.stream
+  } catch (error) {
+    return forwardError(c, error instanceof SyntaxError ? new InvalidRequestError("Invalid JSON.") : error)
+  }
   const model = payload.model
   const stream = !!payload.stream
-  const thinking = payload.thinking?.type ?? null
-  const effort = payload.output_config?.effort ?? null
-  const resolvedModel = translateModelName(model, anthropicBeta)
-
-  // === DIAGNOSTIC: dump anthropic request bodies to disk for inspection (ToonFlow internal calls) ===
-  try {
-    const fs = await import("fs")
-    const dumpPath = "/tmp/conduit-messages-dump.jsonl"
-    const msgs = (payload.messages as Array<{ role: string; content: unknown }> | undefined) ?? []
-    const last = msgs[msgs.length - 1]
-    const summary = {
-      ts: Date.now(),
-      requestId,
-      model,
-      stream,
-      msg_count: msgs.length,
-      last_role: last?.role,
-      last_user_text: (() => {
-        if (!last) return null
-        const c = last.content
-        if (typeof c === "string") return c.slice(0, 600)
-        if (Array.isArray(c)) {
-          return c
-            .map((b: { type?: string; text?: string }) => (b.type === "text" ? b.text ?? "" : ""))
-            .join("")
-            .slice(0, 600)
-        }
-        return null
-      })(),
-      first_system_text: (() => {
-        const sys = payload.system
-        if (typeof sys === "string") return sys.slice(0, 300)
-        if (Array.isArray(sys)) {
-          return sys
-            .map((b: { type?: string; text?: string }) => (b.type === "text" ? b.text ?? "" : ""))
-            .join("")
-            .slice(0, 300)
-        }
-        return null
-      })(),
-      total_payload_bytes: rawBody.length,
-    }
-    fs.appendFileSync(dumpPath, JSON.stringify(summary) + "\n")
-  } catch {
-    // ignore
-  }
+  const thinking = isRecord(payload.thinking) ? payload.thinking.type ?? null : null
+  const effort = isRecord(payload.output_config) ? payload.output_config.effort ?? null : null
+  const availableModelIds = state.models?.data.map((available) => available.id) ?? null
+  const resolvedModel = resolveModelName(model, availableModelIds, anthropicBeta)
 
   logEmitter.emitLog({
     ts: Date.now(), level: "info", type: "request_start", requestId,
@@ -102,18 +89,18 @@ export async function handleMessages(c: Context) {
     })
   }
 
-  const strategy = getRouteStrategy(model)
+  const strategy = getRouteStrategy(resolvedModel)
 
   // ---------------------------------------------------------------------------
-  // Web Search interception — Tavily
+  // Web Search interception
   //
   // Claude Code sends a dedicated sub-request for web search with a server tool
-  // ({type: "web_search_20250305"}) in the tools array. The Copilot upstream
-  // does not support Anthropic server tools, so the request would fail silently.
+  // ({type: "web_search_20250305"}) in the tools array. For verified models,
+  // translate that request to Copilot's native Responses `web_search` tool.
   //
-  // When TAVILY_API_KEY is configured we short-circuit the request here: call
-  // Tavily for search results and return an Anthropic-native response containing
-  // server_tool_use + web_search_tool_result blocks that Claude Code expects.
+  // Tavily remains a fallback for older models that do not expose native search.
+  // Both backends return Anthropic-native server_tool_use,
+  // web_search_tool_result, and text blocks that Claude Code expects.
   // ---------------------------------------------------------------------------
   const anthropicPayload = payload as Record<string, unknown>
   const webSearchServerTool = anthropicPayload.tools
@@ -123,126 +110,137 @@ export async function handleMessages(c: Context) {
     : undefined
 
   const tavilyApiKey = state.stWebSearchApiKey || process.env.TAVILY_API_KEY
-  if (webSearchServerTool && tavilyApiKey) {
-    // Extract the search query from the first user message.
-    const messages = (anthropicPayload as { messages: Array<{ content: string | Array<{ type: string; text?: string }> }> }).messages
-    const firstMsg = messages[0]
-    const rawContent =
-      typeof firstMsg?.content === "string"
-        ? firstMsg.content
-        : Array.isArray(firstMsg?.content)
-          ? firstMsg.content
-              .filter((b) => b.type === "text")
-              .map((b) => b.text ?? "")
-              .join(" ")
-          : ""
-    const query =
-      rawContent.replace(/^Perform a web search for the query:\s*/i, "").trim() || rawContent
-
-    // Call Tavily
-    let searchResults: Array<{ url: string; title: string; content: string }> = []
-    try {
-      const tavilyResp = await fetch("https://api.tavily.com/search", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${tavilyApiKey}`,
-        },
-        body: JSON.stringify({ query, max_results: 5 }),
-      })
-      const tavilyData = (await tavilyResp.json()) as {
-        results?: Array<{ url: string; title: string; content: string }>
-      }
-      searchResults = tavilyData.results ?? []
-    } catch {
-      // Tavily unavailable — we'll return empty results below
-    }
-
-    // Build Anthropic-native response blocks
-    const srvId = `srvtoolu_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
-    const webResults = searchResults.map((r) => ({
-      type: "web_search_result" as const,
-      url: r.url,
-      title: r.title,
-      encrypted_content: "" as const,
-      page_age: null as null,
-    }))
-    const summaryText = searchResults.length
-      ? searchResults.map((r) => `${r.title}\n${r.url}\n${r.content}`).join("\n\n---\n\n")
-      : "No results found."
-
-    const contentBlocks = [
-      { type: "server_tool_use" as const, id: srvId, name: "web_search", input: { query } },
-      { type: "web_search_tool_result" as const, tool_use_id: srvId, content: webResults },
-      { type: "text" as const, text: summaryText },
-    ]
-    const responseBody = {
-      id: `msg_${requestId}`,
-      type: "message" as const,
-      role: "assistant" as const,
-      model,
-      content: contentBlocks,
-      stop_reason: "end_turn" as const,
-      stop_sequence: null as null,
-      usage: { input_tokens: 0, output_tokens: 0 },
-    }
-
-    const latencyMs = Math.round(performance.now() - startTime)
-    logEmitter.emitLog({
-      ts: Date.now(), level: "info", type: "request_end", requestId,
-      msg: `200 web_search (tavily) ${latencyMs}ms`,
-      data: {
-        path: "/v1/messages", format: "anthropic", model, resolvedModel,
-        latencyMs, stream, status: "success", statusCode: 200,
-        sessionId, clientName, clientVersion,
-      },
-    })
-
-    if (!stream) {
-      return c.json(responseBody)
-    }
-
-    // Streaming: emit SSE events matching the Anthropic streaming protocol.
-    return streamSSE(c, async (sseStream) => {
-      const emit = (event: string, data: unknown) =>
-        sseStream.writeSSE({ event, data: JSON.stringify(data) })
-
-      await emit("message_start", {
-        type: "message_start",
-        message: { ...responseBody, content: [], stop_reason: null },
-      })
-
-      for (let i = 0; i < contentBlocks.length; i++) {
-        await emit("content_block_start", {
-          type: "content_block_start",
-          index: i,
-          content_block: contentBlocks[i],
-        })
-        const block = contentBlocks[i]!
-        if (block.type === "server_tool_use") {
-          await emit("content_block_delta", {
-            type: "content_block_delta",
-            index: i,
-            delta: {
-              type: "input_json_delta",
-              partial_json: JSON.stringify(block.input),
-            },
-          })
-        }
-        await emit("content_block_stop", { type: "content_block_stop", index: i })
-      }
-
-      await emit("message_delta", {
-        type: "message_delta",
-        delta: { stop_reason: "end_turn" },
-        usage: { output_tokens: 0 },
-      })
-      await emit("message_stop", { type: "message_stop" })
-    })
-  }
-  // --- End Web Search interception ---
 
   try {
+    if (webSearchServerTool) {
+      const query = extractWebSearchQuery(anthropicPayload)
+      if (!query) throw new InvalidRequestError("A non-empty web search query is required.", "messages")
+      const srvId = `srvtoolu_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
+      let responseBody: ReturnType<typeof buildNativeWebSearchResponse> | null = null
+      let searchBackend: "copilot-native" | "tavily" | null = null
+
+      if (supportsNativeWebSearch(resolvedModel)) {
+        try {
+          const nativeResponse = await createResponses(
+            buildNativeWebSearchPayload(resolvedModel, query, webSearchServerTool),
+            { signal: c.req.raw.signal },
+          ) as Parameters<typeof buildNativeWebSearchResponse>[0]
+          responseBody = buildNativeWebSearchResponse(nativeResponse, {
+            requestId,
+            requestedModel: model,
+            requestedQuery: query,
+            serverToolUseId: srvId,
+          })
+          searchBackend = "copilot-native"
+        } catch (error) {
+          if (error instanceof InvalidRequestError && error.code !== "unsupported_feature") throw error
+          if (!tavilyApiKey) throw error
+          logEmitter.emitLog({
+            ts: Date.now(), level: "warn", type: "upstream_error", requestId,
+            msg: "Native web search failed; trying the configured Tavily fallback",
+            data: { error: extractErrorDetails(error).errorDetail },
+          })
+        }
+      }
+
+      if (!responseBody && tavilyApiKey) {
+        // Call Tavily only when native search is unavailable or failed.
+        if (webSearchServerTool.user_location) {
+          throw new InvalidRequestError("The Tavily fallback cannot preserve an approximate user_location.", "tools", "unsupported_feature")
+        }
+        const tavilyResp = await fetch("https://api.tavily.com/search", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${tavilyApiKey}`,
+          },
+          body: JSON.stringify({
+            query, max_results: 5,
+            ...(webSearchServerTool.allowed_domains !== undefined && { include_domains: webSearchServerTool.allowed_domains }),
+            ...(webSearchServerTool.blocked_domains !== undefined && { exclude_domains: webSearchServerTool.blocked_domains }),
+          }),
+          signal: c.req.raw.signal,
+        })
+        if (!tavilyResp.ok) throw await HTTPError.fromResponse("Tavily web search failed", tavilyResp)
+        const tavilyData: unknown = await tavilyResp.json()
+        if (!isRecord(tavilyData) || !Array.isArray(tavilyData.results)) {
+          throw new HTTPError("Tavily returned an invalid search response.", 502)
+        }
+        const searchResults = tavilyData.results.map((result: unknown) => {
+          if (!isRecord(result) || typeof result.url !== "string" || typeof result.title !== "string" || typeof result.content !== "string") {
+            throw new HTTPError("Tavily returned an invalid search result.", 502)
+          }
+          return { url: result.url, title: result.title, content: result.content }
+        })
+
+        const webResults = searchResults.map((result) => ({
+          type: "web_search_result" as const,
+          url: result.url,
+          title: result.title,
+          encrypted_content: "",
+        }))
+        const summaryText = searchResults.length
+          ? searchResults.map((result) => `${result.title}\n${result.url}\n${result.content}`).join("\n\n---\n\n")
+          : "No results found."
+        responseBody = {
+          id: `msg_${requestId}`,
+          type: "message",
+          role: "assistant",
+          model,
+          content: [
+            { type: "server_tool_use", id: srvId, name: "web_search", input: { query } },
+            { type: "web_search_tool_result", tool_use_id: srvId, content: webResults },
+            { type: "text", text: summaryText },
+          ],
+          stop_reason: "end_turn",
+          stop_sequence: null,
+          usage: {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+            service_tier: "standard",
+            server_tool_use: { web_search_requests: 1 },
+          },
+        }
+        searchBackend = "tavily"
+      }
+
+      if (responseBody && searchBackend) {
+        const latencyMs = Math.round(performance.now() - startTime)
+        logEmitter.emitLog({
+          ts: Date.now(), level: "info", type: "request_end", requestId,
+          msg: `200 web_search (${searchBackend}) ${latencyMs}ms`,
+          data: {
+            path: "/v1/messages", format: "anthropic", model, resolvedModel,
+            strategy: `web_search_${searchBackend}`,
+            inputTokens: responseBody.usage.input_tokens,
+            outputTokens: responseBody.usage.output_tokens,
+            latencyMs, stream, status: "success", statusCode: 200,
+            sessionId, clientName, clientVersion,
+          },
+        })
+
+        if (!stream) return c.json(responseBody)
+
+        return streamSSE(c, async (sseStream) => {
+          for (const event of webSearchResponseToSSE(responseBody)) {
+            await sseStream.writeSSE({
+              event: event.event,
+              data: JSON.stringify(event.data),
+            })
+          }
+        })
+      }
+      if (strategy === "translate") {
+        throw new InvalidRequestError(
+          "This model has no configured web search backend. Select a native-search model or configure Tavily.",
+          "tools", "unsupported_feature",
+        )
+      }
+    }
+    // --- End Web Search interception ---
+
     if (strategy === "passthrough") {
       // ★ PASSTHROUGH: Claude models go directly, no translation
       const response = await passthroughToMessages(rawBody, model, stream, anthropicBeta)
@@ -254,11 +252,27 @@ export async function handleMessages(c: Context) {
         const writer = writable.getWriter()
         const reader = response.body.getReader()
         const decoder = new TextDecoder()
+        const encoder = new TextEncoder()
         let inputTokens = 0
         let outputTokens = 0
 
+        // Keep-alive heartbeat: emit an SSE comment line every 15s while idle so that
+        // upstream stalls (e.g. long reasoning with no token output) do not trigger the
+        // client's fetch idle timeout (~5 min in undici/Node), which surfaces to users as
+        // "socket connection was closed unexpectedly".
+        const HEARTBEAT_MS = 15_000
+        let lastWriteAt = performance.now()
+        const heartbeatTimer = setInterval(() => {
+          if (performance.now() - lastWriteAt < HEARTBEAT_MS) return
+          writer.write(encoder.encode(": ka\n\n")).then(
+            () => { lastWriteAt = performance.now() },
+            () => { /* writer already closed/errored; main loop will clean up */ },
+          )
+        }, HEARTBEAT_MS)
+
         // Pipe in background, log when done
         ;(async () => {
+          let streamError: unknown = null
           try {
             while (true) {
               const { done, value } = await reader.read()
@@ -280,22 +294,58 @@ export async function handleMessages(c: Context) {
               }
 
               await writer.write(value)
+              lastWriteAt = performance.now()
             }
+          } catch (err) {
+            streamError = err
+            // Attempt to surface the error to the client as an Anthropic-style SSE error event
+            // so the client sees a proper error instead of an abrupt socket close.
+            try {
+              const { errorDetail } = extractErrorDetails(err)
+              const errorMessage =
+                typeof errorDetail === "string"
+                  ? errorDetail
+                  : (errorDetail as { message?: string })?.message ?? String(err)
+              const errorPayload = {
+                type: "error",
+                error: { type: "api_error", message: errorMessage },
+              }
+              const sseBytes = new TextEncoder().encode(
+                `event: error\ndata: ${JSON.stringify(errorPayload)}\n\n`,
+              )
+              await writer.write(sseBytes)
+            } catch { /* client may have already disconnected; ignore */ }
           } finally {
-            await writer.close()
-            reader.releaseLock()
+            clearInterval(heartbeatTimer)
+            try { await writer.close() } catch { /* already closed or errored */ }
+            try { reader.releaseLock() } catch { /* already released */ }
             const latencyMs = Math.round(performance.now() - startTime)
-            logEmitter.emitLog({
-              ts: Date.now(), level: "info", type: "request_end", requestId,
-              msg: `200 ${model} ${latencyMs}ms`,
-              data: {
-                path: "/v1/messages", format: "anthropic", model, resolvedModel,
-                strategy: "passthrough",
-                inputTokens, outputTokens, latencyMs,
-                stream: true, status: "success", statusCode: 200,
-                sessionId, clientName, clientVersion,
-              },
-            })
+            if (streamError) {
+              const { errorDetail, statusCode } = extractErrorDetails(streamError)
+              logEmitter.emitLog({
+                ts: Date.now(), level: "error", type: "request_end", requestId,
+                msg: `${statusCode} ${model} ${latencyMs}ms (stream interrupted)`,
+                data: {
+                  path: "/v1/messages", format: "anthropic", model, resolvedModel,
+                  strategy: "passthrough",
+                  inputTokens, outputTokens, latencyMs,
+                  stream: true, status: "error", statusCode, error: errorDetail,
+                  sessionId, clientName, clientVersion,
+                },
+              })
+            } else {
+              logEmitter.emitLog({
+                ts: Date.now(), level: "info", type: "request_end", requestId,
+                msg: `200 ${model} ${latencyMs}ms`,
+                data: {
+                  path: "/v1/messages", format: "anthropic", model, resolvedModel,
+                  strategy: "passthrough",
+                  inputTokens, outputTokens, latencyMs,
+                  stream: true, status: "success", statusCode: 200,
+                  sessionId, clientName, clientVersion,
+                },
+              })
+            }
           }
         })()
 
@@ -328,8 +378,9 @@ export async function handleMessages(c: Context) {
     } else {
       // TRANSLATE: Non-Claude models need Anthropic → OpenAI conversion
       const anthropicPayload = JSON.parse(rawBody)
+      anthropicPayload.model = resolvedModel
       const openAIPayload = translateToOpenAI(anthropicPayload)
-      const response = await createChatCompletions(openAIPayload)
+      const response = await createCompatibleChatCompletions(openAIPayload)
 
       if (!stream) {
         // Non-streaming translated response

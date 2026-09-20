@@ -2,6 +2,11 @@ import { describe, it, expect } from "vitest"
 import { deriveClientIdentity } from "../src/util/client-identity"
 
 describe("deriveClientIdentity", () => {
+  it.each(["codex_cli_rs/0.155.1 (Mac OS)", "codex/0.155.1", "codex-cli/0.155.1"])("detects Codex: %s", (userAgent) => {
+    const result = deriveClientIdentity("session", userAgent, "default", null)
+    expect(result).toEqual({ sessionId: "session", clientName: "codex", clientVersion: "0.155.1" })
+  })
+
   it("detects Claude Code", () => {
     const result = deriveClientIdentity(null, "claude-cli/2.1.104", "default", null)
     expect(result.clientName).toBe("claude-code")

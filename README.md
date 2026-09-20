@@ -1,139 +1,158 @@
 # Conduit
 
-**Run Claude Code with Opus 4.7 — powered by your GitHub Copilot subscription.**
+**Use Codex CLI and Claude Code with the models available to your GitHub Copilot account.**
 
 [简体中文](./README_zh.md) · English
 
----
-
-Claude Code is the best AI coding agent. But its official API:
-
-- Isn't available in many countries
-- Costs real money per token even when you already pay Anthropic or an IDE vendor
-- Requires a separate Anthropic billing account
-
-Meanwhile, **GitHub Copilot includes Claude Opus 4.7, Sonnet 4.6, Haiku 4.5 and more** — and natively speaks the Anthropic Messages API. If you already have a Copilot subscription (individual, Business, or an MSFT account), you can run Claude Code against it today.
-
-Conduit is the local proxy that makes it work.
-
-```
-Claude Code ──▶ Conduit (localhost) ──▶ GitHub Copilot API
-                                        │
-                                        └─ Claude Opus 4.7 etc.
+```text
+Codex CLI -------- Responses API -------+
+Claude Code ------ Messages API --------+--> Conduit :7133 --> GitHub Copilot
+OpenAI clients --- Chat Completions ----+
+                                            Dashboard :7023
 ```
 
-## Why not other Copilot proxies?
+Conduit is a local, unofficial Copilot gateway. It preserves native Responses
+requests for Codex instead of converting function tools, custom `apply_patch`,
+images or encrypted reasoning into a less capable chat protocol. Claude's
+Messages route and its model-specific compatibility shims remain available.
 
-Most Copilot proxies translate Anthropic Messages → OpenAI Chat Completions and back. In that round-trip they silently drop:
+**Verified with Codex CLI 0.155.1 on 2026-09-20.** This does not make every OpenAI
+hosted service available on Copilot. Model access, tools, limits and billing are
+controlled by GitHub and your organization.
 
-- `thinking` blocks
-- `output_config.effort`
-- `cache_control` (prompt caching!)
-- `context_management`
-- `top_k`, `service_tier`
+## Quick start
 
-**Conduit passes Anthropic requests through unchanged.** No translation, no data loss. Tool calls, streaming, thinking, and prompt caching all work the way Anthropic designed them.
-
-## Quick Start
+Requirements: Bun 1.3+, a Copilot-enabled GitHub account, and macOS/Linux/WSL.
+For Codex, also install the [official CLI](https://github.com/openai/codex).
 
 ```bash
-# 1. Install
-git clone https://github.com/aaronagent/conduit.git
+git clone https://github.com/aaronlab/conduit.git
 cd conduit
 bun install
 
-# 2. Launch the proxy — you'll be prompted to log in to GitHub once
-CONDUIT_API_KEY=$(openssl rand -hex 16) bun run dev
+# Keep the same local key across restarts; never commit it.
+test -s .conduit-key || (umask 077; openssl rand -hex 32 > .conduit-key)
+export CONDUIT_API_KEY="$(cat .conduit-key)"
+# Local dashboard only: Vite exposes VITE_* values to its browser client.
+export VITE_API_KEY="$CONDUIT_API_KEY"
+bun run dev
 ```
 
-The proxy listens on `:7133` and a dashboard on `:7023`. Copy the key it prints — you'll use it below.
+The first start uses GitHub's device login. The proxy listens on `:7133`, and
+the dashboard on `:7023`. Do not expose an unauthenticated development instance
+to a network.
 
-### Point Claude Code at Conduit
+These commands create a raw key file. The Codex helper also accepts legacy
+`CONDUIT_API_KEY=...` key files; for those files, export the assignment's value
+when starting the proxy rather than the entire file. Keep the dashboard local:
+do not publish a frontend built with a real `VITE_API_KEY`.
+
+### Codex
+
+In another terminal, from this repository:
 
 ```bash
-export ANTHROPIC_BASE_URL=http://localhost:7133
-export ANTHROPIC_AUTH_TOKEN=<the-key-from-above>
-export ANTHROPIC_MODEL=claude-opus-4.7
-export ANTHROPIC_SMALL_FAST_MODEL=claude-haiku-4.5
+./bin/conduit-codex
+./bin/conduit-codex --help
+```
+
+The helper loads `CONDUIT_API_KEY` or the local `.conduit-key`, downloads a
+capability-aware model catalog, and launches Codex with a custom Responses
+provider. It does **not** replace your Codex configuration/login or disable its
+sandbox and approval controls.
+
+See [the Codex guide](./docs/CODEX.md) for explicit provider configuration,
+model selection, web search, browser MCP setup, verified capabilities and
+troubleshooting.
+
+### Claude Code
+
+Choose models actually available in your account's catalog:
+
+```bash
+unset ANTHROPIC_API_KEY
+export ANTHROPIC_BASE_URL=http://127.0.0.1:7133
+export ANTHROPIC_AUTH_TOKEN="$(cat .conduit-key)"
+export ANTHROPIC_MODEL=<available-model-id>
 claude
 ```
 
-> **Important:** use `ANTHROPIC_AUTH_TOKEN`, not `ANTHROPIC_API_KEY`. If `ANTHROPIC_API_KEY` is set in your shell, Claude Code will send it to Anthropic's servers and bypass Conduit.
+Available Claude models use the native Messages endpoint. Non-Claude models
+use the existing translation path. The existing fallback for unavailable
+Claude aliases and the Anthropic `web_search_*` to Sol native-search bridge
+are preserved. Review [model compatibility](./docs/MODEL_COMPATIBILITY.md)
+before relying on an old model name.
 
-Or save it as a one-shot alias:
+## Capabilities and boundaries
+
+| Capability | Support |
+|---|---|
+| Codex HTTP/SSE, shell and custom `apply_patch` | Verified end to end |
+| Multi-turn function/custom/MCP tool outputs | Preserved, including images |
+| Opaque reasoning, instructions, schemas and future Responses fields | Native passthrough |
+| Hosted `web_search` | Verified on Sol; upstream/model dependent |
+| CLI browser automation | Verified with isolated Playwright MCP |
+| Native `computer` / `computer_use_preview` | **Rejected by Copilot in live probes** |
+| WebSocket Responses | Disabled; explicit HTTP fallback |
+| OpenAI `/responses/compact` | Not emulated; use Codex local compaction |
+| Chat-only models in Codex | Not advertised as native Responses models |
+| Claude Messages and OpenAI Chat clients | Retained, with regression tests |
+
+The proxy no longer deletes large historical tool outputs or writes request
+content/screenshot diagnostic dumps automatically. Oversized requests fail
+explicitly instead of silently losing context.
+
+## Development and verification
 
 ```bash
-alias claude-copilot='unset ANTHROPIC_API_KEY; \
-  ANTHROPIC_BASE_URL=http://localhost:7133 \
-  ANTHROPIC_AUTH_TOKEN=<your-key> \
-  ANTHROPIC_MODEL=claude-opus-4.7 \
-  ANTHROPIC_SMALL_FAST_MODEL=claude-haiku-4.5 \
-  claude --dangerously-skip-permissions'
+bun run test
+bun run typecheck
+
+# Opt-in: makes real, billable Copilot requests through a running proxy.
+bun run test:codex --model gpt-5.4-mini
+
+# Optional browser test: Chrome + the pinned Playwright MCP are required.
+bunx @playwright/mcp@0.0.82 --help
+bun run test:codex --model gpt-5.4-mini --browser
 ```
 
-Now `claude-copilot` runs Claude Code on Opus 4.7 via your Copilot subscription.
+The smoke runner uses a temporary Codex home and workspace. It checks real
+shell output, the file produced by `apply_patch`, strict JSON output, and
+optionally a real local browser form plus screenshot feedback. A model merely
+claiming success is not sufficient.
 
-## Features
+## Configuration
 
-- **Anthropic Messages API passthrough** for Claude models — thinking, effort, cache_control, streaming, tool use all native
-- **OpenAI Chat Completions translation** for GPT/Gemini models (so `/chat/completions` works too)
-- **Smart model routing** — one endpoint serves both protocols, detection is automatic
-- **Per-model compatibility shims** — automatically reshapes requests that upstream would reject (e.g. `thinking: enabled` → `adaptive` for Opus 4.7)
-- **GitHub OAuth Device Flow** — one-time login, JWT auto-refreshes
-- **Monitoring dashboard** on `:7023` — live stats, request log, model catalog
-- **SQLite request log** — every request, model, latency, tokens
-- **SSE keepalive & 255s idle timeout** — long `thinking` responses don't get cut off
-
-See [docs/MODEL_COMPATIBILITY.md](./docs/MODEL_COMPATIBILITY.md) for which models support what, and [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) for the internals.
-
-### Drive Claude Code from another device
-
-`bin/conduit-remote` wraps a persistent `tmux` session in a browser-based
-terminal so you can reach Claude Code from your phone, iPad, or another
-laptop — same Wi-Fi, Tailscale, Cloudflare Tunnel, or SSH all work. See
-[docs/REMOTE_ACCESS.md](./docs/REMOTE_ACCESS.md).
-
-## Environment Variables
-
-| Variable | Default | Description |
+| Variable | Default | Purpose |
 |---|---|---|
-| `CONDUIT_PORT` | `7133` | Proxy listen port |
-| `CONDUIT_API_KEY` | _(empty)_ | API key clients must present. If empty, dev-mode allows any request |
-| `CONDUIT_INTERNAL_KEY` | _(empty)_ | Dashboard → proxy auth |
-| `CONDUIT_TOKEN_PATH` | `data/github_token` | GitHub token file |
-| `CONDUIT_DB_PATH` | `data/conduit.db` | SQLite database path |
-| `CONDUIT_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
-| `CONDUIT_BASE_URL` | _(empty)_ | Public URL, used in dashboard Connect page |
+| `CONDUIT_PORT` | `7133` | Proxy port |
+| `CONDUIT_API_KEY` | empty | Client authentication; empty means unauthenticated development mode |
+| `CONDUIT_INTERNAL_KEY` | empty | Dashboard-to-proxy authentication |
+| `CONDUIT_TOKEN_PATH` | `packages/proxy/data/github_token` | GitHub token location |
+| `CONDUIT_DB_PATH` | `data/conduit.db` | SQLite path, relative to the proxy process working directory |
+| `CONDUIT_BASE_URL` | empty | Advertised base URL |
 
-## API Endpoints
+Never use your GitHub token as the client-facing Conduit key. Keep credentials,
+generated catalogs and databases out of Git.
 
-| Method | Path | Description |
+## API
+
+| Method | Path | Purpose |
 |---|---|---|
-| POST | `/v1/messages` | Anthropic Messages API (passthrough for Claude) |
-| POST | `/v1/chat/completions` | OpenAI Chat Completions |
-| GET | `/v1/models` | Model list |
+| POST | `/v1/responses` | Native Copilot Responses, including SSE |
+| GET | `/v1/models?client_version=0.155.1` | Codex `ModelInfo` catalog |
+| GET | `/v1/models` | OpenAI-compatible model list |
+| POST | `/v1/messages` | Anthropic Messages |
+| POST | `/v1/chat/completions` | Chat Completions; dynamically routes Responses-only models |
 | GET | `/health` | Health check |
-| GET | `/api/stats` | Dashboard stats |
-| GET | `/api/requests` | Request log (paginated) |
-| GET | `/api/copilot/models` | Copilot model capabilities |
+| GET | `/api/copilot/models?refresh=true` | Refresh current Copilot model metadata |
+| GET | `/api/stats`, `/api/requests` | Request metadata, usage and error monitoring |
 
-## Requirements
-
-- **GitHub Copilot subscription** — Individual / Business / Enterprise all work
-- [**Bun**](https://bun.sh) ≥ 1.3 (the proxy and dashboard both run on Bun)
-- macOS / Linux / WSL
-
-## Troubleshooting
-
-- **`API Error: 401 Invalid API key`** → you probably left `ANTHROPIC_API_KEY` set. `unset ANTHROPIC_API_KEY` and use `ANTHROPIC_AUTH_TOKEN` instead.
-- **`Failed to get Copilot token` on startup** → your GitHub account doesn't have Copilot access. Subscribe or log in with a different account.
-- **Banner shows `Opus 4 · API Usage Billing`** → cosmetic, ignore. Check the Conduit dashboard (`http://localhost:7023`) for the real model being sent.
-- **More** → [docs/FAQ.md](./docs/FAQ.md)
-
-## Tech Stack
-
-Bun · Hono 4 · Vite + React 19 · SQLite (WAL mode) · TypeScript (strict)
+Further reading: [Architecture](./docs/ARCHITECTURE.md) ·
+[FAQ](./docs/FAQ.md) · [Remote Claude Code access](./docs/REMOTE_ACCESS.md).
 
 ## License
 
-MIT. Conduit is an independent project and is not affiliated with Anthropic or GitHub.
+MIT. Conduit is independent of GitHub, OpenAI and Anthropic. Use it only with
+accounts you are authorized to use and in accordance with applicable service
+terms and organization policies.

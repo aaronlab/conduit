@@ -10,6 +10,29 @@ packages/
 
 ## Request lifecycle
 
+### Codex / Responses
+
+```text
+Codex CLI -> POST /v1/responses -> validate envelope / resolve explicit alias
+         -> Copilot /responses -> normalize SSE framing and completed items
+         -> Codex executes function, custom apply_patch or MCP tools locally
+         -> next request replays input and opaque reasoning without truncation
+```
+
+The native path preserves input, tools, structured output, reasoning and
+unknown future fields. Client disconnects cancel the upstream request.
+Session/turn headers are allowlisted; the local client's credentials are
+never forwarded as the Copilot credential. Upstream error status, structured
+error codes and retry hints survive the return path.
+
+`GET /v1/models` retains OpenAI's `{object, data}` shape. Requests with a
+`client_version` query receive the separate Codex `{models}` catalog, whose
+capabilities and limits derive from current Copilot metadata. Only eligible
+native Responses models are advertised to Codex. Responses Lite and
+WebSocket transport are disabled in the recommended configuration.
+
+### Claude / Messages
+
 ```
 ┌──────────────┐     1. POST /v1/messages           ┌──────────────┐
 │  Claude Code │ ──────────────────────────────────▶│   Conduit    │
@@ -48,6 +71,12 @@ packages/
 | `app.ts` | Hono app assembly — mounts all routes with middleware |
 | `middleware.ts` | API key auth (`Authorization: Bearer` / `x-api-key`) |
 | `lib/model-router.ts` | Decides passthrough vs translate, normalizes model names |
+| `routes/responses/handler.ts` | Native Codex Responses routing, streaming, cancellation and monitoring |
+| `services/copilot/create-responses.ts` | Lossless authenticated Responses transport and image/history classification |
+| `lib/responses-request.ts` | Envelope validation and explicit effort aliases |
+| `lib/responses-stream.ts` | Typed events, completion recovery and premature-EOF detection |
+| `lib/responses-bridge.ts` | Chat-to-Responses adaptation, selected using live supported endpoints |
+| `util/sse.ts` | Shared incremental UTF-8 and CR/LF/CRLF framing |
 | `routes/messages/passthrough.ts` | Anthropic → Copilot native `/v1/messages` |
 | `routes/messages/translate.ts` | Anthropic → OpenAI Chat Completions fallback |
 | `routes/messages/handler.ts` | Dispatches between passthrough and translate |
@@ -58,7 +87,7 @@ packages/
 ### `packages/dashboard/src/pages/`
 
 - `Home` — live stats (requests, error rate, latency, tokens)
-- `Logs` — request log with full request/response body inspection
+- `Logs` — request metadata, status, latency, token usage and error inspection
 - `Models` — Copilot model catalog grouped by vendor
 - `Connect` — copy-paste setup instructions
 - `Settings` — toggles: web search, custom upstream providers, rate limiting
@@ -70,7 +99,18 @@ packages/
 - Built-in TypeScript, no bundler needed in dev
 - `bun:sqlite` is WAL-mode out of the box
 
-`idleTimeout` is set to 255 (Bun's max) so long-running `thinking` responses aren't cut off. If you need even longer we plan to add SSE keepalive comments (`: keepalive\n\n`) inside the passthrough stream.
+`idleTimeout` is set to 255 (Bun's max). Long-lived response streams also send
+15-second SSE comments. This keeps the downstream connection alive without
+inventing model tokens; it cannot prevent an upstream timeout or remove an
+upstream context limit.
+
+No request-body diagnostic dumps are written automatically. In particular,
+large historical tool results and screenshots are no longer replaced with
+placeholders to work around request limits. Clients must compact or reduce
+oversized input explicitly.
+
+See [Codex support and boundaries](./CODEX.md) for the native computer-tool,
+remote compaction and WebSocket limitations, and the tested MCP alternative.
 
 ## Auth chain
 

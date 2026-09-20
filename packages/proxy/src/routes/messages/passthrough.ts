@@ -108,12 +108,22 @@ export async function passthroughToMessages(
   //   claude-opus-4.7         → only "medium"
   //   claude-opus-4.7-high    → only "high"
   //   claude-opus-4.7-xhigh   → only "xhigh"
+  //   claude-opus-4.8         → supports [low medium high xhigh max]; we force
+  //                             "max" (the strongest tier — matches Claude Code's
+  //                             "Max" effort). Adaptive thinking keeps trivial
+  //                             calls fast and only thinks deeply when needed.
+  //   claude-opus-5           → same whitelist as 4.8, verified by probe:
+  //                             "supported values: [low medium high xhigh max]".
+  //                             Force "max".
   //   claude-haiku-4.5        → does not support effort at all (strip)
-  const MODEL_EFFORT_OVERRIDES: Record<string, "medium" | "high" | "xhigh" | "strip"> = {
+  const MODEL_EFFORT_OVERRIDES: Record<string, "medium" | "high" | "xhigh" | "max" | "strip"> = {
     "claude-opus-4.7": "medium",
     "claude-opus-4-7": "medium",
     "claude-opus-4.7-high": "high",
     "claude-opus-4.7-xhigh": "xhigh",
+    "claude-opus-4.8": "max",
+    "claude-opus-4-8": "max",
+    "claude-opus-5": "max",
     "claude-haiku-4.5": "strip",
     "claude-haiku-4-5": "strip",
   }
@@ -164,7 +174,13 @@ export async function passthroughToMessages(
         "anthropic-version": "2023-06-01",
       },
       body: patchedBody,
-    })
+      // Bun-specific: disable the default ~5min fetch timeout. Reasoning
+      // models (e.g. claude-opus-4.7-xhigh) can stall mid-stream for >5min
+      // while thinking, which otherwise triggers "The operation timed out."
+      // from the upstream fetch. We rely on the SSE heartbeat in the handler
+      // to keep the downstream client connection alive.
+      ...({ timeout: false } as object),
+    } as RequestInit)
 
   let response = await doFetch()
 

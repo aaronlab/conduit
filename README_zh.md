@@ -1,139 +1,150 @@
 # Conduit
 
-**用你的 GitHub Copilot 订阅，在 Claude Code 里跑 Opus 4.7。**
+**用你的 GitHub Copilot 账户，为 Codex CLI、Claude Code 和 OpenAI 客户端提供模型接口。**
 
 简体中文 · [English](./README.md)
 
----
-
-Claude Code 是目前最好用的 AI 编程 Agent。但它官方 API：
-
-- 很多地区用不了
-- 花的是 Anthropic 的钱，即使你已经订阅了 Copilot 或别的 IDE 服务
-- 要单独注册 Anthropic 账号、绑卡
-
-另一边，**GitHub Copilot 里包含了 Claude Opus 4.7、Sonnet 4.6、Haiku 4.5 等模型**，而且原生支持 Anthropic Messages API。只要你有 Copilot 订阅（个人版、Business、Microsoft 账号都行），今天就能让 Claude Code 用上。
-
-Conduit 就是让这条路走通的本地代理。
-
-```
-Claude Code ──▶ Conduit（本地）──▶ GitHub Copilot API
-                                   │
-                                   └─ Claude Opus 4.7 等模型
+```text
+Codex CLI -------- Responses API -------+
+Claude Code ------ Messages API --------+--> Conduit :7133 --> GitHub Copilot
+OpenAI 客户端 ----- Chat Completions ----+
+                                            Dashboard :7023
 ```
 
-## 和其它 Copilot 代理有什么不同？
+Conduit 是本地、非官方的 Copilot 代理。Codex 走原生 Responses 协议，不把
+自定义 `apply_patch`、图像、工具输出或加密推理状态降级成普通聊天消息；
+现有 Claude Messages 透传及其兼容处理继续保留。
 
-市面上大多数 Copilot 代理把 Anthropic Messages → OpenAI Chat Completions 来回翻译。翻译的过程中会悄悄丢掉这些东西：
-
-- `thinking` 思考块
-- `output_config.effort`（思考强度）
-- `cache_control`（Prompt 缓存！）
-- `context_management`
-- `top_k`、`service_tier`
-
-**Conduit 原样透传 Anthropic 请求，不做翻译、不丢参数。** 工具调用、流式、thinking、prompt 缓存都按 Anthropic 设计的方式工作。
+**本次对照并实测的是 Codex CLI 0.155.1，验证日期为 2026-09-20。**
+这不代表 Copilot 提供了 OpenAI 的所有服务。模型可用性、工具、额度和计费，
+仍由 GitHub 及你的组织策略决定。
 
 ## 快速开始
 
+需要 Bun 1.3+、有 Copilot 权限的 GitHub 账户，以及 macOS/Linux/WSL。
+使用 Codex 时，还需要安装 [官方 CLI](https://github.com/openai/codex)。
+
 ```bash
-# 1. 安装
-git clone https://github.com/aaronagent/conduit.git
+git clone https://github.com/aaronlab/conduit.git
 cd conduit
 bun install
 
-# 2. 启动代理，首次运行会提示你用 GitHub 登录
-CONDUIT_API_KEY=$(openssl rand -hex 16) bun run dev
+# 保留已有密钥，不要提交到 Git。
+test -s .conduit-key || (umask 077; openssl rand -hex 32 > .conduit-key)
+export CONDUIT_API_KEY="$(cat .conduit-key)"
+# 仅用于本地 Dashboard；VITE_* 会进入浏览器端代码。
+export VITE_API_KEY="$CONDUIT_API_KEY"
+bun run dev
 ```
 
-代理监听 `:7133`，Dashboard 监听 `:7023`。把控制台里打出来的 API key 记下来，下一步会用。
+首次启动按提示完成 GitHub 设备登录。代理监听 `:7133`，Dashboard 监听
+`:7023`。不要把未配置鉴权的开发实例暴露到网络。
 
-### 让 Claude Code 走 Conduit
+上述命令生成的是纯 key 文件。Codex 启动器也兼容旧版
+`CONDUIT_API_KEY=...` 格式；这种文件启动代理时应导出赋值中的 key，
+不要把整行作为 key。Dashboard 请仅供本地使用，不要公开部署带真实
+`VITE_API_KEY` 的前端构建产物。
+
+### 使用 Codex
+
+在仓库目录另开一个终端：
 
 ```bash
-export ANTHROPIC_BASE_URL=http://localhost:7133
-export ANTHROPIC_AUTH_TOKEN=<上一步生成的 key>
-export ANTHROPIC_MODEL=claude-opus-4.7
-export ANTHROPIC_SMALL_FAST_MODEL=claude-haiku-4.5
+./bin/conduit-codex
+./bin/conduit-codex --help
+```
+
+启动器读取 `CONDUIT_API_KEY` 或本地 `.conduit-key`，获取当前账户的
+Codex 模型目录，再通过自定义 Responses provider 启动 Codex。
+**不会覆盖你的 Codex 配置、登录状态，也不会关闭沙箱或审批。**
+
+模型选择、手动配置、联网搜索、浏览器 MCP 和故障排查见
+[Codex 专项说明](./docs/CODEX.md)。
+
+### 使用 Claude Code
+
+请从当前账户实际可用的模型中选择：
+
+```bash
+unset ANTHROPIC_API_KEY
+export ANTHROPIC_BASE_URL=http://127.0.0.1:7133
+export ANTHROPIC_AUTH_TOKEN="$(cat .conduit-key)"
+export ANTHROPIC_MODEL=<当前可用的模型 ID>
 claude
 ```
 
-> **⚠️ 重点：** 用 `ANTHROPIC_AUTH_TOKEN`，**不要**用 `ANTHROPIC_API_KEY`。如果你 shell 里已经设了 `ANTHROPIC_API_KEY`，Claude Code 会绕过 Conduit 直接打 Anthropic 官方，你还会被扣 Anthropic 那边的钱。
+可用的 Claude 模型继续走原生 Messages 接口；其他模型保留原有翻译链路。
+Claude 别名不可用时的既有回退逻辑，以及
+`Anthropic web_search_* -> Sol /responses web_search` 适配也保留。
+旧模型名称与兼容处理见 [模型兼容说明](./docs/MODEL_COMPATIBILITY.md)。
 
-也可以直接写一条 alias（加到 `~/.zshrc`）：
+## 哪些能力已经验证
+
+| 能力 | 结果 |
+|---|---|
+| Codex HTTP/SSE、shell、自定义 `apply_patch` | 真实 CLI 端到端通过 |
+| 多轮函数、自定义工具、MCP 工具结果 | 保留原协议，支持图像结果 |
+| 加密推理、指令、结构化输出及新增 Responses 字段 | 原生透传 |
+| 原生 `web_search` | Sol 实测通过，仍取决于上游和模型 |
+| CLI 浏览器操作 | 隔离的 Playwright MCP 实测通过 |
+| 原生 `computer` / `computer_use_preview` | **Copilot 实测返回不支持** |
+| WebSocket Responses | 未启用；明确回退到 HTTP |
+| OpenAI `/responses/compact` | 不伪造兼容；使用 Codex 本地上下文压缩 |
+| 仅支持 Chat 的模型直接用于 Codex | 不冒充 Responses 模型 |
+| Claude Messages / OpenAI Chat | 保留，并加入相关回归测试 |
+
+代理不再自动删除大型历史工具结果，也不再自动把请求内容、截图写到诊断文件。
+超出上游限制会明确报错，而不是悄悄丢上下文。
+
+## 验证与开发
 
 ```bash
-alias claude-copilot='unset ANTHROPIC_API_KEY; \
-  ANTHROPIC_BASE_URL=http://localhost:7133 \
-  ANTHROPIC_AUTH_TOKEN=<你的 key> \
-  ANTHROPIC_MODEL=claude-opus-4.7 \
-  ANTHROPIC_SMALL_FAST_MODEL=claude-haiku-4.5 \
-  claude --dangerously-skip-permissions'
+bun run test
+bun run typecheck
+
+# 主动运行：会向已启动的代理发送真实请求，消耗 Copilot 用量。
+bun run test:codex --model gpt-5.4-mini
+
+# 浏览器测试额外需要 Chrome 和指定版本的 Playwright MCP。
+bunx @playwright/mcp@0.0.82 --help
+bun run test:codex --model gpt-5.4-mini --browser
 ```
 
-之后 `claude-copilot` 就是**用 Copilot 订阅跑 Opus 4.7 版的 Claude Code**。
+测试使用临时 Codex home 和临时工作目录，核对真实 shell 输出、
+`apply_patch` 创建的文件和严格 JSON 结果；可选浏览器测试还会验证
+真实表单操作及截图回传，不把模型口头说“成功”当成通过。
 
-## 功能
-
-- **Anthropic Messages API 原生透传**——thinking、effort、cache_control、流式、tool_use 全部原汁原味
-- **OpenAI Chat Completions 翻译**——GPT/Gemini 模型也能用（同一个端点）
-- **智能模型路由**——一个 endpoint 两套协议，按模型名自动判断
-- **按模型做请求适配**——自动修正上游会拒的请求形状（比如 Opus 4.7 只收 `adaptive` thinking，Conduit 会自动把 `enabled` 翻成 `adaptive`）
-- **GitHub OAuth Device Flow**——扫一次码，Copilot JWT 自动续期
-- **监控 Dashboard**（`:7023`）——实时统计、请求日志、模型目录
-- **SQLite 请求日志**——每一条都留痕（模型、延迟、token 数）
-- **SSE 心跳 & 255s idle 超时**——长思考不会被切断
-
-详细的模型兼容矩阵见 [docs/MODEL_COMPATIBILITY.md](./docs/MODEL_COMPATIBILITY.md)，架构细节见 [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)。
-
-### 在别的设备上操作 Claude Code
-
-`bin/conduit-remote` 把一个常驻 tmux 会话包成网页终端，手机/iPad/另一台
-电脑（同 Wi-Fi、Tailscale、Cloudflare Tunnel 或 SSH 端口转发都行）打开
-浏览器就能直接接管本机的 Claude Code。详情见
-[docs/REMOTE_ACCESS.md](./docs/REMOTE_ACCESS.md)。
-
-## 环境变量
+## 配置
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `CONDUIT_PORT` | `7133` | 代理监听端口 |
-| `CONDUIT_API_KEY` | _(空)_ | 客户端要带的 API key。留空等于开发模式，任何请求都放行 |
-| `CONDUIT_INTERNAL_KEY` | _(空)_ | Dashboard → proxy 之间的内部鉴权 |
-| `CONDUIT_TOKEN_PATH` | `data/github_token` | GitHub token 文件位置 |
-| `CONDUIT_DB_PATH` | `data/conduit.db` | SQLite 数据库位置 |
-| `CONDUIT_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` |
-| `CONDUIT_BASE_URL` | _(空)_ | Conduit 的公网地址，Dashboard 的 Connect 页会用到 |
+| `CONDUIT_PORT` | `7133` | 代理端口 |
+| `CONDUIT_API_KEY` | 空 | 客户端鉴权；留空为无鉴权开发模式 |
+| `CONDUIT_INTERNAL_KEY` | 空 | Dashboard 到代理的鉴权 |
+| `CONDUIT_TOKEN_PATH` | `packages/proxy/data/github_token` | GitHub token 文件 |
+| `CONDUIT_DB_PATH` | `data/conduit.db` | 相对代理进程工作目录的数据库路径 |
+| `CONDUIT_BASE_URL` | 空 | 对外展示的代理地址 |
 
-## API Endpoints
+GitHub token 与客户端访问 Conduit 的 key 是两种不同凭据。
+不要提交凭据、生成的模型目录或数据库。
 
-| Method | Path | 说明 |
+## API
+
+| 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/v1/messages` | Anthropic Messages API（Claude 走 passthrough）|
-| POST | `/v1/chat/completions` | OpenAI Chat Completions |
-| GET | `/v1/models` | 模型列表 |
+| POST | `/v1/responses` | 原生 Copilot Responses，支持 SSE |
+| GET | `/v1/models?client_version=0.155.1` | Codex `ModelInfo` 模型目录 |
+| GET | `/v1/models` | OpenAI 格式的模型列表 |
+| POST | `/v1/messages` | Anthropic Messages |
+| POST | `/v1/chat/completions` | Chat Completions；按最新模型元数据选择 Responses 桥接 |
 | GET | `/health` | 健康检查 |
-| GET | `/api/stats` | Dashboard 统计 |
-| GET | `/api/requests` | 请求日志（分页） |
-| GET | `/api/copilot/models` | Copilot 模型能力明细 |
+| GET | `/api/copilot/models?refresh=true` | 刷新 Copilot 模型能力 |
+| GET | `/api/stats`、`/api/requests` | 请求元数据、用量和错误监控 |
 
-## 前置要求
-
-- **GitHub Copilot 订阅**——Individual / Business / Enterprise 都行
-- [**Bun**](https://bun.sh) ≥ 1.3
-- macOS / Linux / WSL
-
-## 常见问题
-
-- **`API Error: 401 Invalid API key`** → 大概率是你 shell 里还留着 `ANTHROPIC_API_KEY`。`unset ANTHROPIC_API_KEY`，然后用 `ANTHROPIC_AUTH_TOKEN`。
-- **启动时报 `Failed to get Copilot token`** → 你的 GitHub 账号没开 Copilot。订阅一下或者换个有 Copilot 的账号。
-- **Claude Code 的 banner 显示 `Opus 4 · API Usage Billing`** → 纯 UI 缓存，不是实际在用的模型。去 Conduit Dashboard（`http://localhost:7023`）看真实走的模型。
-- **更多** → [docs/FAQ.md](./docs/FAQ.md)
-
-## 技术栈
-
-Bun · Hono 4 · Vite + React 19 · SQLite (WAL) · TypeScript (strict)
+更多说明：[架构](./docs/ARCHITECTURE.md) · [FAQ](./docs/FAQ.md) ·
+[远程操作 Claude Code](./docs/REMOTE_ACCESS.md)。
 
 ## 许可证
 
-MIT。Conduit 是个人项目，与 Anthropic 和 GitHub 没有官方关联。
+MIT。Conduit 与 GitHub、OpenAI、Anthropic 没有官方关联。
+请只使用你获准使用的账户，并遵守相关服务条款和组织策略。

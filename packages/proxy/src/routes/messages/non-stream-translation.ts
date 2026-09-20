@@ -183,6 +183,10 @@ export function translateToOpenAI(
 }
 
 function translateModelName(model: string): string {
+  if (model.endsWith("[1m]")) {
+    return model.slice(0, -4)
+  }
+
   const match = model.match(
     /^(claude-(?:opus|sonnet|haiku))-(\d+)-(\d{1,2})(?:-(1m))?(?:-\d{8})?$/
   )

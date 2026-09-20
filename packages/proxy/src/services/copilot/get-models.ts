@@ -1,8 +1,10 @@
 import { copilotBaseUrl, copilotHeaders } from "./../../lib/api-config"
 import { HTTPError } from "./../../lib/error"
 import { state } from "./../../lib/state"
+import { ensureFreshCopilotToken } from "../../lib/token"
 
 export const getModels = async () => {
+  await ensureFreshCopilotToken()
   const response = await fetch(`${copilotBaseUrl(state)}/models`, {
     headers: copilotHeaders(state),
   })
@@ -17,17 +19,26 @@ export interface ModelsResponse {
   object: string
 }
 
-interface ModelLimits {
+export interface ModelLimits {
   max_context_window_tokens: number | null
   max_output_tokens: number | null
   max_prompt_tokens: number | null
-  max_inputs: number | null
+  max_inputs?: number | null
+  vision?: {
+    max_prompt_image_size?: number
+    max_prompt_images?: number
+    supported_media_types?: string[]
+  }
 }
 
-interface ModelSupports {
+export interface ModelSupports {
   tool_calls: boolean | null
   parallel_tool_calls: boolean | null
-  dimensions: boolean | null
+  dimensions?: boolean | null
+  streaming?: boolean
+  vision?: boolean
+  structured_outputs?: boolean
+  reasoning_effort?: string[]
 }
 
 interface ModelCapabilities {
@@ -48,6 +59,7 @@ export interface Model {
   preview: boolean
   vendor: string
   version: string
+  supported_endpoints?: string[]
   policy: {
     state: string
     terms: string
