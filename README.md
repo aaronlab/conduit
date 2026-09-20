@@ -65,6 +65,12 @@ See [the Codex guide](./docs/CODEX.md) for explicit provider configuration,
 model selection, web search, browser MCP setup, verified capabilities and
 troubleshooting.
 
+For a two-letter command, the optional [cx preset](./docs/CODEX.md#short-command-cx)
+launches Astra with max reasoning, an exact 872k usable budget and live search.
+**It also disables Codex sandboxing and standard execution approvals.**
+Use it only when you explicitly want that trusted-project preset; the normal
+launcher above does not weaken permissions.
+
 For Astra with explicit max reasoning, live search and an exact **872,000-token
 usable client budget**:
 

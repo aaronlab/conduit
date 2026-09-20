@@ -61,6 +61,10 @@ Codex 模型目录，再通过自定义 Responses provider 启动 Codex。
 模型选择、手动配置、联网搜索、浏览器 MCP 和故障排查见
 [Codex 专项说明](./docs/CODEX.md)。
 
+想用两个字母启动，可以安装 [cx 快捷入口](./docs/CODEX.md#short-command-cx)，之后在目标项目目录输入 `cx`。
+它预置 Astra、max、872k 可用预算和实时搜索，**也会关闭 Codex 沙箱及常规执行审批**；
+请仅在明确需要该权限配置的可信项目中使用，普通启动器不会自动降低权限限制。
+
 需要 **Astra + max 思考 + 实时联网搜索 + 精确 872k 可用上下文**时：
 
 ```bash

@@ -31,6 +31,8 @@ through `/v1/chat/completions`, but are not advertised as native Codex models.
 
 ## Manual provider configuration
 
+For the optional short command, see [the `cx` preset](#short-command-cx).
+
 For a manually managed setup, use a user-level Codex configuration like:
 
 ```toml
@@ -67,6 +69,48 @@ Select a model explicitly, or forward normal Codex arguments after `--`:
 `data/codex` directory, with private directory/file permissions. The key file
 may contain either a raw key or a `CONDUIT_API_KEY=...` assignment; it is parsed
 as data, never sourced as a shell script.
+
+## Short command: `cx`
+
+`bin/cx` is an explicit opt-in shortcut for the previously described
+**Astra / max / 872,000 usable tokens / live search / no sandbox / no standard
+execution approvals** combination:
+
+```bash
+./bin/cx
+./bin/cx exec "Explain this project"
+./bin/cx --help
+```
+
+To install it on your PATH once, run from this checkout:
+
+```bash
+mkdir -p "$HOME/.local/bin"
+ln -s "$PWD/bin/cx" "$HOME/.local/bin/cx"
+```
+
+The link command deliberately does not overwrite an existing command. Ensure
+`$HOME/.local/bin` is on your shell's PATH. Then, from the project you want to
+work on:
+
+```bash
+cx
+```
+
+The proxy must already be running. The shortcut preserves the current working
+directory and forwards extra Codex arguments without shell evaluation. It
+does not replace the original `codex` command or edit login/configuration files.
+Model and context selection are fixed by this preset; use `conduit-codex` for
+different settings. Explicit extra Codex configuration can override defaults
+such as reasoning or search.
+
+**Permission warning:** this preset intentionally passes
+`--dangerously-bypass-approvals-and-sandbox`. Only use it in trusted projects.
+It does not grant root access or bypass independent OS, organization, hook or
+MCP permissions. The ordinary `conduit-codex` entry point retains its safer
+default behavior.
+
+## Provider configuration notes
 
 Important:
 
@@ -274,6 +318,45 @@ against actual saved Codex token-count events in the temporary home.
 - **Privacy:** normal logging records request metadata/usage/errors, not
   automatic conversation or screenshot dumps. Generated catalogs and keys
   are local files and should not be committed.
+
+## Codex CLI versus the graphical Chat / Work interface
+
+Checked against OpenAI's current documentation on 2026-09-21:
+
+| Entry point | Main emphasis |
+|---|---|
+| ChatGPT **Chat** | Questions, conversation, web research, ideas and short drafts |
+| ChatGPT **Work** | Multi-step tasks that produce reviewable results, such as reports, presentations, spreadsheets and workflows |
+| Graphical **Codex** view | Developer-facing project, Git/diff, test and review workflows, with more technical detail |
+| **Codex CLI** | The terminal client used by `conduit-codex` and `cx` |
+
+OpenAI documents overlapping core capabilities between Work and Codex, with
+different product views and execution environments. Work on the web runs in a managed cloud
+environment; the desktop app can offer local or cloud work depending on account,
+workspace and available features. Chat / Work is an interaction/workflow choice,
+not a reasoning-effort setting or a sandbox-permission switch.
+
+This project's route is:
+
+```text
+cx -> official Codex CLI -> local Conduit proxy -> GitHub Copilot inference
+```
+
+The CLI remains OpenAI's Codex client. Conduit changes its model-provider
+connection; it does not turn it into Copilot CLI or the ChatGPT desktop app.
+Official ChatGPT Work and Codex share OpenAI usage limits, whereas inference
+through this proxy consumes the selected GitHub Copilot account's usage.
+Those entitlements are not automatically interchangeable.
+
+The shortcut's provider overrides apply to the CLI process it launches.
+Opening a GUI does not automatically inherit them. GUI access to browser,
+desktop, plugins or cloud environments is not supplied merely by proxying
+Responses. **GUI-to-Conduit/Copilot routing has not been validated here** and
+would require separate configuration and testing.
+
+Sources: [OpenAI mode comparison](https://learn.chatgpt.com/docs/use-chatgpt),
+[Work and local/cloud execution](https://learn.chatgpt.com/docs/get-started-with-work),
+[official usage/plan rules](https://learn.chatgpt.com/docs/pricing).
 
 ## Upstream references
 

@@ -5,6 +5,11 @@ All notable changes to Conduit are documented here. Format follows [Keep a Chang
 ## [Unreleased]
 
 ### Added
+- Opt-in `cx` shortcut for the Astra/max/872k/live-search preset, including the
+  explicitly requested sandbox/approval bypass; tested argument and working-directory
+  preservation through a PATH symlink. The normal launcher remains unchanged.
+- Current official ChatGPT Chat/Work versus graphical Codex/CLI comparison,
+  including execution-environment and provider/usage distinctions.
 - Verified Astra native web search at max effort, plus an opt-in
   `--context-budget` launcher setting with exact usable-token accounting,
   upstream-limit validation and separate per-budget catalog caches.

@@ -1,0 +1,37 @@
+#!/usr/bin/env bun
+import { fileURLToPath } from "node:url"
+import { runConduitCodex } from "../packages/proxy/src/lib/codex-cli.ts"
+
+const args = process.argv.slice(2)
+if (args[0] === "--help" || args[0] === "-h") {
+  console.log(`Usage: cx [Codex arguments...]
+
+Conduit shortcut: gpt-6-astra, max reasoning, 872000 usable context tokens,
+live web search, and no Codex sandbox or standard execution approvals.
+
+WARNING: This intentionally uses --dangerously-bypass-approvals-and-sandbox.
+Use only in trusted projects. It does not grant OS/root permissions.
+Independent MCP, hook, organization and OS permissions may still apply.
+The Conduit proxy must already be running. Your current directory is preserved.
+
+  cx
+  cx exec "Explain this project"
+  cx resume
+
+Other Codex arguments are forwarded after the preset. This shortcut does not
+replace codex, edit your login/configuration, or configure the ChatGPT GUI.
+Use conduit-codex instead when you want different model or permission settings.`)
+  process.exit(0)
+}
+
+process.exitCode = await runConduitCodex([
+  "--model", "gpt-6-astra",
+  "--context-budget", "872000",
+  "--",
+  "--dangerously-bypass-approvals-and-sandbox",
+  "-c", 'model_reasoning_effort="max"',
+  "-c", 'web_search="live"',
+  ...args,
+], {
+  repoRoot: fileURLToPath(new URL("..", import.meta.url)),
+})
