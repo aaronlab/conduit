@@ -89,6 +89,8 @@ Astra 的目录与启动器默认请求 `detailed` 推理摘要；摘要开关�
 ```
 
 它采用独立的私有配置，不覆盖你原有的登录和设置，GUI 默认保留审批。
+授予 macOS 权限后，Work 的本地 `@Computer` 插件也已在独立测试窗口中完成
+截图、输入、点击和结果校验。
 支持范围、界面推理标签的已知问题，以及网页登录/云端功能的区别，见
 [GUI 专项说明](./docs/CODEX.md#official-desktop-gui-through-conduit-macos)。
 
@@ -118,7 +120,8 @@ Claude 别名不可用时的既有回退逻辑，以及
 | 加密推理、指令、结构化输出及新增 Responses 字段 | 原生透传 |
 | 原生 `web_search` | Sol、Astra（包括 max 思考）实测通过，仍取决于上游和模型 |
 | CLI 浏览器操作 | 隔离的 Playwright MCP 实测通过 |
-| 原生 `computer` / `computer_use_preview` | **Copilot 实测返回不支持** |
+| 桌面 Work 的本地 `@Computer` 插件 | Astra / max 操作独立 macOS 测试窗口通过；需系统权限及逐应用授权 |
+| 托管 Responses `computer` / `computer_use_preview` | **Copilot 实测返回不支持** |
 | WebSocket Responses | 未启用；明确回退到 HTTP |
 | OpenAI `/responses/compact` | 不伪造兼容；使用 Codex 本地上下文压缩 |
 | 仅支持 Chat 的模型直接用于 Codex | 不冒充 Responses 模型 |

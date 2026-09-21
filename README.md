@@ -97,7 +97,9 @@ been verified through Conduit. On macOS, run:
 ```
 
 It uses a separate private profile, preserves your existing login/settings,
-and keeps GUI approvals enabled. See [GUI setup and verified limitations](./docs/CODEX.md#official-desktop-gui-through-conduit-macos).
+and keeps GUI approvals enabled. The Work view's local `@Computer` plugin
+also passed a controlled native-app screenshot/input/click test after macOS
+permissions were granted. See [GUI setup and verified limitations](./docs/CODEX.md#official-desktop-gui-through-conduit-macos).
 Hosted ChatGPT Chat/cloud services are not implicitly rerouted.
 
 ### Claude Code
@@ -127,7 +129,8 @@ before relying on an old model name.
 | Opaque reasoning, instructions, schemas and future Responses fields | Native passthrough |
 | Hosted `web_search` | Verified on Sol and Astra (including max effort); upstream/model dependent |
 | CLI browser automation | Verified with isolated Playwright MCP |
-| Native `computer` / `computer_use_preview` | **Rejected by Copilot in live probes** |
+| Desktop Work local `@Computer` plugin | Verified on a controlled macOS app with Astra / max; requires OS and per-app permissions |
+| Hosted Responses `computer` / `computer_use_preview` | **Rejected by Copilot in live probes** |
 | WebSocket Responses | Disabled; explicit HTTP fallback |
 | OpenAI `/responses/compact` | Not emulated; use Codex local compaction |
 | Chat-only models in Codex | Not advertised as native Responses models |

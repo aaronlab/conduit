@@ -178,6 +178,26 @@ workspace-write sandboxing**. This is
 deliberately different from the unrestricted `cx` preset. The launcher does
 not grant Accessibility, Screen Recording or other OS permissions.
 
+New profiles also enable the desktop's separate **Max** reasoning option
+using `desktop.enabled-reasoning-efforts` in the dedicated `config.toml`.
+In desktop 26.915.31945, setting only `model_reasoning_effort="max"` and the
+catalog default is insufficient: if Max is hidden by desktop preferences,
+the app can write the default back to `medium` on startup.
+
+For an older dedicated profile, quit the app and back up its `config.toml`.
+Set the top-level `model_reasoning_effort="max"` and add `"max"` to the
+existing `desktop.enabled-reasoning-efforts` array. If the preference is
+absent, the tested default plus Max is:
+
+```toml
+[desktop]
+enabled-reasoning-efforts = ["low", "medium", "high", "xhigh", "max", "ultra", "persistent"]
+```
+
+Merge into an existing `[desktop]` table rather than duplicating it, preserve
+other settings and levels, then reopen with `cxg`. The launcher preserves
+existing profiles; it does not silently undo an intentionally lower effort.
+
 Environment overrides: `CONDUIT_GUI_APP_PATH`, `CONDUIT_GUI_HOME`,
 `CONDUIT_GUI_DATA_DIR`, and `CONDUIT_CODEX_BASE_URL`. Use dedicated directories;
 do not point the GUI profile at your existing `~/.codex`.
@@ -191,17 +211,20 @@ do not point the GUI profile at your existing `~/.codex`.
   usable context window of **872000**.
 - The Work GUI performed native `web_search_call` search/open-page actions
   and displayed the official source URL.
-- In desktop 26.915.31945, the reasoning button may show **Medium / 中**
-  for this custom provider even while the backend uses **max**. This is not
-  inferred from the label: the actual session context was inspected.
-  Manually moving the UI intensity control can set a lower explicit effort.
-  The app's visible slider currently only exposes low/medium/high/xhigh.
+- In desktop 26.915.31945, a profile without the separate Max option may show
+  **Medium / 中** even while an existing thread still uses **max**, and may
+  reset the default for new threads to medium. Enable Max as described above;
+  verify the actual new-thread settings rather than trusting an older thread.
+  Manually moving the intensity control can still select a lower effort.
+- After enabling that option and restarting, the GUI displayed **6 Astra 最高**
+  and a newly created Work conversation independently confirmed provider
+  `conduit`, Astra, **max**, and **872000** usable context tokens.
 - The current custom-provider interface presents **ChatGPT Work** and
   **Codex**. This setup does not reroute hosted ChatGPT Chat, web/cloud Work,
   account-managed connectors, or cloud-only features through Copilot.
-- Desktop Computer Use and other advanced plugins require their own support
-  and OS permissions; they are not claimed as verified merely because text
-  and native web search work.
+- Desktop Computer Use passed the scoped native-app test below. Other apps,
+  plugins and workflows still need their own permissions and verification;
+  text or web-search success alone does not establish their support.
 
 ### `@Computer`: setup and current verification boundary
 
@@ -226,19 +249,34 @@ These system permissions are separate from the in-chat app approval and from
 Codex's shell sandbox. Do not edit TCC databases, disable OS protections, or
 grant every application access as a workaround.
 
-**The full computer-operation loop is not yet verified on this machine.**
-The actual `@Computer` test initially hit a native-helper startup failure.
-An enabled legacy MCP entry also used a relative executable path with
-`cwd="."`, which resolved against the wrong directory and produced `ENOENT`.
-That separate missing-file issue was diagnosed with a private configuration
-backup. After resetting the Computer Use JS session, the managed plugin path
-reached per-app approval. Access was allowed only to a generated, harmless
-**Conduit Computer Test** window for that conversation.
+**The full local computer-operation loop passed on 2026-09-21**, after the
+user granted the macOS permissions and the app was reopened. The test used
+official ChatGPT **26.915.31945**, its bundled Codex
+**0.155.0-alpha.9.2**, and the local Work view through Conduit. Actual session
+records confirmed **gpt-6-astra / max / 872000 usable context tokens**.
 
-The native tool then explicitly reported **Accessibility and Screen Recording
-permissions still pending**, and no screenshot/type/click success marker was
-produced. User confirmation is required before repeating the test; this must
-not be reported as working merely because the plugin is installed.
+Only a generated, harmless native Cocoa window, **Conduit UI Probe**, was
+approved for the current conversation. The real `mcp__cua_repl` calls:
+
+1. Reset the JS session and acquired that specific app.
+2. Read its accessibility state and screenshot to obtain the visible code;
+   the prompt did not contain that code.
+3. Clicked the input, typed the observed code, and clicked **Verify**.
+4. Read the resulting accessibility state and took a confirmation screenshot.
+
+The session returned **two images**, completed without a tool error, and the
+test app independently wrote a fresh `COMPUTER_GUI_NATIVE_VERIFIED` marker
+only after its Verify handler accepted the input. The marker was created
+after this test turn began. No other app, personal browser profile, fixture
+source read, or shell/AppleScript shortcut was used to complete the task.
+This verifies a scoped native-app workflow, not every application or action.
+
+Earlier attempts encountered helper startup failures, a separate legacy
+relative-path `ENOENT`, and pending macOS permissions. After permission was
+granted, an older generated AppleScript dialog also timed out; that attempt
+is **not** counted as a pass. The successful retest used a standard Cocoa
+window and the official app-managed plugin, without patching OpenAI binaries
+or translating hosted `computer` calls into a fake executor.
 
 The app regenerates its legacy compatibility entry during startup. **Do not
 repeatedly force that disabled entry on as a fix for macOS permissions.**
@@ -258,10 +296,23 @@ for native Computer Use. Preserve other plugin configuration and back up the
 dedicated config before manual changes. See
 [OpenAI's Computer Use setup and approval guide](https://learn.chatgpt.com/docs/computer-use).
 
-Normal `cxg` launches **do not enable a debugging port**. Temporary local
-inspection was used only to verify the real desktop UI, then removed for
-normal use. Using the stock app icon directly may select its ordinary profile;
-use `cxg` (or your dedicated Conduit GUI shortcut) for this isolated route.
+### How the GUI was operated during validation
+
+Temporary Playwright automation connected to the desktop app's internal
+Chromium UI using the Chrome DevTools Protocol (CDP), listening only on
+`127.0.0.1`. It selected Work/Codex, entered prompts and handled the test-app
+approval. This is app-internal UI automation, not a system-wide remote
+desktop connection.
+
+The native fixture was **not** operated through CDP. Its observations, input
+and clicks came from the official Computer Use helper, with macOS permissions
+and per-app approval. Those tool results and the independent fixture marker,
+not the model's success message alone, establish the pass.
+
+Normal `cxg` launches **do not enable a debugging port**. The temporary
+inspection instance was closed and the app relaunched normally after testing.
+Using the stock app icon directly may select its ordinary profile; use `cxg`
+(or your dedicated Conduit GUI shortcut) for this isolated route.
 
 Official references:
 [custom providers](https://learn.chatgpt.com/docs/config-file/config-advanced#custom-model-providers),
@@ -420,15 +471,16 @@ session does not acquire these overrides automatically.
 | Astra native `web_search` at `max` | Real search/open-page calls and citations; upstream echoed max |
 | Astra explicit 872k budget | Real Codex runtime context count was exactly 872,000; not a full-window stress test |
 | Codex + Playwright MCP 0.0.82 | Navigation, form fill, click, verified page state and screenshot/image feedback passed |
+| Desktop Work + Astra / max + local `@Computer` | Native Cocoa app observation, code entry, Verify click, two screenshots and an independent success marker passed |
 | `computer` with `gpt-6-astra` | HTTP 400, `unsupported_value`, tool not supported |
 | `computer_use_preview` with Sol | HTTP 400, `unsupported_value`, tool not supported |
 
 These are point-in-time results, not guarantees about every model or account.
 No personal browser profile or desktop was used for the browser test.
-The catalog enables verified freeform patches on these three models. Deferred
-tool search and browser/image replay are marked verified only for the mini
-baseline; other native models keep ordinary local tools rather than being
-promised untested capabilities.
+The catalog enables verified freeform patches on these three models. Its
+deferred tool-search and CLI MCP-browser capability flags remain verified only
+for the mini baseline. The desktop Astra screenshot/action test is separately
+scoped; it does not establish deferred tool search or every CLI browser setup.
 
 ### Web search
 
@@ -469,6 +521,15 @@ tool workflow: Codex calls a local MCP server, the server operates an isolated
 browser, and text/images return through Responses function-tool outputs.
 It is not native hosted computer use, and it does not grant control of your
 macOS desktop.
+
+**The official desktop's local `@Computer` plugin also works through Conduit
+in the tested Work configuration.** Its `cua_repl` tools execute locally in
+the official native helper; screenshots and tool results return to Astra
+through Responses. This is a third, distinct path, requiring macOS permissions
+and approval for the target app. See the
+[native desktop verification](#computer-setup-and-current-verification-boundary)
+above. It does not make Copilot accept hosted `computer` tool definitions or
+add a desktop executor to Codex CLI.
 
 An example interactive browser MCP configuration:
 

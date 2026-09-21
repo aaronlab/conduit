@@ -15,12 +15,21 @@ capability-aware Responses catalog, not `wire_api = "chat"`. See
 
 ## Does Codex computer use work?
 
-The tested Copilot endpoint rejects native `computer` and
-`computer_use_preview` tools. Codex CLI browser automation via Playwright MCP
-was verified separately, including real navigation, form filling, clicking
-and image feedback. These are different protocols and execution environments.
-The proxy cannot turn an unavailable hosted computer service into a working
-desktop executor.
+There are three distinct paths:
+
+- **Hosted Responses `computer` / `computer_use_preview`:** the tested
+  Copilot endpoint rejects these tool definitions.
+- **Codex CLI + Playwright MCP:** isolated browser navigation, form filling,
+  clicking and image feedback were verified.
+- **Official desktop Work + local `@Computer`:** Astra at max reasoning
+  successfully observed a controlled native macOS app, entered its visible
+  code, clicked Verify and confirmed the result with screenshots and an
+  independent app-generated marker. This requires macOS Screen Recording,
+  Accessibility and per-app approval.
+
+The latter two execute tools locally; the proxy does not manufacture a hosted
+computer service. The desktop pass does not imply that every app or workflow
+has been tested. See [desktop setup and evidence](./CODEX.md#computer-setup-and-current-verification-boundary).
 
 ## Does this bypass Anthropic's rate limits?
 

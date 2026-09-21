@@ -35,6 +35,7 @@ describe("dedicated official GUI configuration", () => {
     expect(config).toContain('web_search = "live"')
     expect(config).toContain('approval_policy = "on-request"')
     expect(config).toContain('sandbox_mode = "workspace-write"')
+    expect(config).toContain('[desktop]\nenabled-reasoning-efforts = ["low", "medium", "high", "xhigh", "max", "ultra", "persistent"]')
     expect(config).toContain("[model_providers.conduit.auth]")
     expect(config).toContain('command = "/trusted/path with spaces/bun"')
     expect(config).toContain("--stdio-token")
@@ -98,7 +99,7 @@ describe("dedicated official GUI configuration", () => {
     const catalog = createCodexCatalog([source])
     const script = `
       import {prepareGuiProfile} from ${JSON.stringify(join(repo, "packages/proxy/src/lib/codex-gui.ts"))};
-      import {readFile,appendFile} from "node:fs/promises";
+      import {readFile,appendFile,writeFile} from "node:fs/promises";
       const options=JSON.parse(process.argv[1]);
       const catalog=JSON.parse(process.argv[2]);
       const fetcher=async(_url,init)=>{
@@ -110,17 +111,28 @@ describe("dedicated official GUI configuration", () => {
       const second=await prepareGuiProfile(options,fetcher);
       const config=Bun.TOML.parse(await readFile(second.configPath,"utf8"));
       const model=JSON.parse(await readFile(second.catalogPath,"utf8")).models[0];
-      console.log(JSON.stringify({config,model}));
+      const custom=(await readFile(second.configPath,"utf8"))
+        .replace('model_reasoning_effort = "max"','model_reasoning_effort = "high"')
+        .replace(/^enabled-reasoning-efforts = .+$/m,'enabled-reasoning-efforts = ["high"]');
+      await writeFile(second.configPath,custom);
+      await prepareGuiProfile(options,fetcher);
+      const preserved=Bun.TOML.parse(await readFile(second.configPath,"utf8"));
+      console.log(JSON.stringify({config,model,preserved}));
     `
     const { stdout } = await execute("bun", ["-e", script, JSON.stringify(opts), JSON.stringify(catalog)], { timeout: 10_000 })
     const result = JSON.parse(stdout)
     expect(result.config.model_provider).toBe("conduit")
+    expect(result.config.model_reasoning_effort).toBe("max")
     expect(result.config.model_reasoning_summary).toBe("detailed")
+    expect(result.config.desktop["enabled-reasoning-efforts"]).toEqual(["low", "medium", "high", "xhigh", "max", "ultra", "persistent"])
     expect(result.config.mcp_servers.fixture.command).toBe("preserve-user-command")
     expect(result.config.model_providers.conduit.auth.command).toBe(opts.bunPath)
     expect(result.model.default_reasoning_level).toBe("max")
     expect(result.model.default_reasoning_summary).toBe("detailed")
     expect(result.model.context_window * result.model.effective_context_window_percent / 100).toBe(872000)
+    expect(result.preserved.model_reasoning_effort).toBe("high")
+    expect(result.preserved.desktop["enabled-reasoning-efforts"]).toEqual(["high"])
+    expect(result.preserved.mcp_servers.fixture.command).toBe("preserve-user-command")
     expect(stdout).not.toContain("gui-fixture-key")
   })
 })

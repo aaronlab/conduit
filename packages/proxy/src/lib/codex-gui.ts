@@ -32,6 +32,9 @@ web_search = "live"
 approval_policy = "on-request"
 sandbox_mode = "workspace-write"
 
+[desktop]
+enabled-reasoning-efforts = ["low", "medium", "high", "xhigh", "max", "ultra", "persistent"]
+
 [analytics]
 enabled = false
 
@@ -167,8 +170,10 @@ The proxy must already be running. Credentials are read from the checkout's
 .conduit-key through a private auth command, never saved in the GUI config.
 Uses separate ~/.codex-conduit-gui and
 ~/Library/Application Support/Conduit ChatGPT directories.
+New profiles enable the desktop's separate Max reasoning option.
 Personal Codex login/configuration is not replaced; existing managed GUI
-settings are preserved. No debugging port is enabled by this launcher.
+settings are preserved, including explicit reasoning choices.
+No debugging port is enabled by this launcher.
 
 Environment: CONDUIT_GUI_APP_PATH, CONDUIT_GUI_HOME, CONDUIT_GUI_DATA_DIR,
 CONDUIT_CODEX_BASE_URL (default ${DEFAULT_CODEX_BASE_URL}).
