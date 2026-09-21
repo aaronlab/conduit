@@ -89,7 +89,7 @@ describe("dedicated official GUI configuration", () => {
     await expect(prepareGuiProfile(opts, async () => Response.json(catalog))).rejects.toThrow("does not advertise reasoning summaries")
   })
 
-  it("uses the real Bun TOML reader, keeps max in the catalog and preserves GUI user settings on relaunch", async () => {
+  it("uses real TOML, preserves settings and installs Study only on request", async () => {
     const opts = options()
     await mkdir(opts.repoRoot)
     await writeFile(join(opts.repoRoot, ".conduit-key"), "CONDUIT_API_KEY=gui-fixture-key\n")
@@ -99,7 +99,7 @@ describe("dedicated official GUI configuration", () => {
     const catalog = createCodexCatalog([source])
     const script = `
       import {prepareGuiProfile} from ${JSON.stringify(join(repo, "packages/proxy/src/lib/codex-gui.ts"))};
-      import {readFile,appendFile,writeFile} from "node:fs/promises";
+      import {readFile,appendFile,writeFile,mkdir} from "node:fs/promises";
       const options=JSON.parse(process.argv[1]);
       const catalog=JSON.parse(process.argv[2]);
       const fetcher=async(_url,init)=>{
@@ -117,7 +117,15 @@ describe("dedicated official GUI configuration", () => {
       await writeFile(second.configPath,custom);
       await prepareGuiProfile(options,fetcher);
       const preserved=Bun.TOML.parse(await readFile(second.configPath,"utf8"));
-      console.log(JSON.stringify({config,model,preserved}));
+      const autoInstalled=await Bun.file(options.home+"/skills/conduit-study/SKILL.md").exists();
+      const skillRoot=options.repoRoot+"/skills/conduit-study";
+      await mkdir(skillRoot+"/agents",{recursive:true});
+      await writeFile(skillRoot+"/SKILL.md","fixture Study instructions");
+      await writeFile(skillRoot+"/agents/openai.yaml","fixture metadata");
+      const installed=await prepareGuiProfile({...options,installStudy:true},fetcher);
+      const studyContent=await readFile(installed.studySkillPath,"utf8");
+      const afterStudy=Bun.TOML.parse(await readFile(installed.configPath,"utf8"));
+      console.log(JSON.stringify({config,model,preserved,autoInstalled,studySkillPath:installed.studySkillPath,studyContent,afterStudy}));
     `
     const { stdout } = await execute("bun", ["-e", script, JSON.stringify(opts), JSON.stringify(catalog)], { timeout: 10_000 })
     const result = JSON.parse(stdout)
@@ -133,6 +141,10 @@ describe("dedicated official GUI configuration", () => {
     expect(result.preserved.model_reasoning_effort).toBe("high")
     expect(result.preserved.desktop["enabled-reasoning-efforts"]).toEqual(["high"])
     expect(result.preserved.mcp_servers.fixture.command).toBe("preserve-user-command")
+    expect(result.autoInstalled).toBe(false)
+    expect(result.studySkillPath).toBe(join(opts.home, "skills", "conduit-study", "SKILL.md"))
+    expect(result.studyContent).toBe("fixture Study instructions")
+    expect(result.afterStudy).toEqual(result.preserved)
     expect(stdout).not.toContain("gui-fixture-key")
   })
 })
@@ -144,6 +156,8 @@ describe("GUI command entry points", () => {
     })
     expect(stdout).toContain("official ChatGPT desktop GUI")
     expect(stdout).toContain("No debugging port")
+    expect(stdout).toContain("--install-study")
+    expect(stdout).toContain("not OpenAI's hosted Study Mode")
     expect(stderr).toBe("")
   })
 

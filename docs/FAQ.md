@@ -31,14 +31,17 @@ The latter two execute tools locally; the proxy does not manufacture a hosted
 computer service. The desktop pass does not imply that every app or workflow
 has been tested. See [desktop setup and evidence](./CODEX.md#computer-setup-and-current-verification-boundary).
 
-## Why is a web `@Study` entry missing from the desktop app?
+## Why is built-in Study Mode missing from the Conduit desktop profile?
 
-The tested Conduit desktop profile uses local Work/Codex, not hosted ChatGPT
-Chat. Its plugin directory had no matching Study package. An `@` mention can
-refer to a plugin or a bundled skill, so identify the exact web entry before
-assuming it is OpenAI's separate Study-mode feature or a portable plugin.
-No official installation route for that exact entry has been verified in
-this profile. See [the investigation and support boundary](./CODEX.md#a-web-study-entry-is-not-automatically-a-local-plugin).
+The web `@study` selector is ChatGPT's built-in Study Mode, not an installable
+plugin. It belongs to regular ChatGPT conversations; this profile instead uses
+local Work/Codex with a third-party model provider. For the original mode, use
+[ChatGPT Study Mode](https://chatgpt.com/studymode) with your ChatGPT account.
+
+For a separate Copilot-backed guided-learning workflow, run
+`./bin/cxg --install-study`, then select **Study (Conduit local)** from the Work
+composer's `@study` search. It is explicitly labeled as a local alternative,
+not the official hosted mode. See [setup and boundaries](./CODEX.md#study-mode-and-local-guided-learning).
 
 ## Does this bypass Anthropic's rate limits?
 

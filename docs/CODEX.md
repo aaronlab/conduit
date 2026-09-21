@@ -319,36 +319,69 @@ Official references:
 [authentication](https://learn.chatgpt.com/docs/auth#alternative-model-providers),
 [local Work/external-provider boundaries](https://learn.chatgpt.com/docs/amazon-bedrock).
 
-### A web `@Study` entry is not automatically a local plugin
+<a id="a-web-study-entry-is-not-automatically-a-local-plugin"></a>
 
-On desktop **26.915.31945** with this external-provider profile, the actual
-public plugin-directory search for `study` returned **no plugins found**.
-There was also no Study package among the bundled plugins or installed local
-skills. No installable official Study package was verified. This is a
-version/profile-specific observation, not proof that every desktop or account
-is incompatible.
+### Study Mode and local guided learning
 
-Do not conflate these different things:
+**ChatGPT's built-in Study Mode is not an installable learning plugin.**
+The [official guide](https://help.openai.com/en/articles/11780217-using-study-mode-in-chatgpt)
+confirms that on the web you type `@study` and **select Study** from the
+suggestions, or open [chatgpt.com/studymode](https://chatgpt.com/studymode).
+Use a signed-in, regular ChatGPT conversation: the guide excludes Temporary
+Chats, GPTs and Projects, and lists web, iOS and Android availability.
 
-- OpenAI's [Study mode / Study and learn](https://help.openai.com/en/articles/11780217),
-  a guided-learning experience documented for ChatGPT web, iOS and Android.
-- A specific web `@study` mention. According to the
-  [plugin guide](https://learn.chatgpt.com/docs/plugins), `@` can identify a
-  plugin or one of its bundled skills; the mention alone is not a package ID.
-- A custom GPT or a homemade tutoring skill, neither of which proves that the
-  original official feature has been installed.
+This Conduit profile runs **local Work/Codex with an external model provider**,
+not hosted ChatGPT Chat. A missing Study selector here is not a missing
+Computer Use permission or a plugin that needs installing. Forwarding
+Responses does not itself supply the hosted Chat mode or its account access.
+No supported switch for enabling the official mode in this provider profile
+has been verified. The official web route uses your ChatGPT account and
+limits, not the Copilot inference route.
 
-The current Conduit route runs **local Work/Codex**, not hosted ChatGPT Chat.
-Forwarding Responses does not itself supply a hosted Chat feature, its account
-access, or its service implementation. The universal plugin directory only
-promises availability on each plugin's supported surfaces.
+For guided learning while keeping Conduit/Copilot, install the separate,
+original **Study (Conduit local)** workflow once:
 
-To investigate a missing web entry, first obtain its exact detail URL or a
-screenshot showing its name and developer, then check its supported surfaces,
-authentication and installation source. Never copy login cookies or tokens
-to make an unrelated plugin appear authenticated. Until that exact entry and
-a supported local installation path are verified, use the existing working
-web entry; do not report a generic tutoring prompt as an installation fix.
+```bash
+./bin/cxg --install-study
+```
+
+Then in a new **Work** conversation:
+
+1. Type `@study` and select **Study (Conduit local)**. Typing the search text
+   alone is not the same as selecting the skill.
+2. Describe the topic, what you already know, and what you want to practice.
+3. Answer its question, request a hint, ask for a quiz, or change the pace.
+4. Say you want to leave study mode, or start a new conversation without the
+   skill, to return to ordinary assistance.
+
+The local workflow uses the currently selected model and existing Conduit
+credentials. It guides one step at a time, checks attempts, gives focused
+feedback, and supports quizzes and review. It is **not** OpenAI's hosted Study
+Mode, does not copy its private instructions, and does not claim its widgets,
+cloud memory, progress synchronization or account entitlements.
+
+**Live verification:** on 2026-09-21, the official desktop's actual mention
+picker selected this skill and its instructions reached the runtime. A
+six-turn Work conversation verified step-by-step hints without a premature
+solution, correction of an intentionally wrong arithmetic step, confirmation
+of the learner's solution, one quiz without its answer, and an explicit exit
+back to an ordinary exact-text response. All six turns used
+**Conduit / Astra / max / 872000 usable context**, with no model tool calls.
+This is a bounded tutoring smoke test, not a claim of official-mode parity or
+teaching quality across every subject.
+
+Installation uses the official
+[local skill format and symlink discovery](https://learn.chatgpt.com/docs/build-skills).
+It links this checkout's `skills/conduit-study` into
+`~/.codex-conduit-gui/skills/conduit-study` (or the dedicated
+`CONDUIT_GUI_HOME`), refusing to replace another skill or follow a symlinked
+destination directory. Keep the checkout available; updates to its skill
+files are reflected through that link. The skill is explicit-only and has no
+MCP server, hooks or dependency installation. Ordinary `cxg` launches,
+personal Codex settings, model selection and approvals are unchanged.
+
+To disable it, use the desktop's skill controls. To remove it, unlink only
+the installed `conduit-study` link, not the source directory or other skills.
 
 ## Visible reasoning summaries
 

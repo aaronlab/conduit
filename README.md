@@ -102,6 +102,11 @@ also passed a controlled native-app screenshot/input/click test after macOS
 permissions were granted. See [GUI setup and verified limitations](./docs/CODEX.md#official-desktop-gui-through-conduit-macos).
 Hosted ChatGPT Chat/cloud services are not implicitly rerouted.
 
+For optional guided learning through Copilot, run `./bin/cxg --install-study`
+and select **Study (Conduit local)** from the Work composer's `@study` search.
+This is a separate explicit-only local workflow, **not** OpenAI's hosted
+Study Mode. See [Study setup and boundaries](./docs/CODEX.md#study-mode-and-local-guided-learning).
+
 ### Claude Code
 
 Choose models actually available in your account's catalog:

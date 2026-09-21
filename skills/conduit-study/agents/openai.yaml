@@ -1,0 +1,7 @@
+interface:
+  display_name: "Study (Conduit local)"
+  short_description: "Local guided learning through Conduit; not OpenAI Study Mode."
+  default_prompt: "Use $conduit-study to help me learn a topic one step at a time."
+
+policy:
+  allow_implicit_invocation: false

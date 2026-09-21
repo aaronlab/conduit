@@ -6,6 +6,7 @@ import { promisify } from "node:util"
 import { fetchCodexCatalog, resolveConduitApiKey, saveCodexCatalog } from "./codex-cli"
 import { DEFAULT_CODEX_REASONING_SUMMARY, selectCodexModel, withCodexContextBudget } from "./codex-catalog"
 import { DEFAULT_CODEX_BASE_URL, normalizeCodexBaseUrl } from "./codex-config"
+import { installConduitStudySkill } from "./codex-study"
 import { isRecord } from "./validation"
 
 const execute = promisify(execFile)
@@ -18,6 +19,7 @@ export interface GuiProfileOptions {
   home: string
   appData: string
   baseUrl: string
+  installStudy?: boolean
 }
 
 export function buildGuiConfig(options: GuiProfileOptions, catalogPath: string): string {
@@ -85,7 +87,7 @@ export function validateGuiProfilePaths(home: string, appData: string, userHome 
 export async function prepareGuiProfile(
   options: GuiProfileOptions,
   fetchImpl: (url: string, init: RequestInit) => Promise<Response> = fetch,
-): Promise<{ configPath: string; catalogPath: string }> {
+): Promise<{ configPath: string; catalogPath: string; studySkillPath?: string }> {
   validateGuiProfilePaths(options.home, options.appData)
   const key = await resolveConduitApiKey(options.repoRoot, {})
   const catalog = await fetchCodexCatalog(options.baseUrl, key, fetchImpl)
@@ -127,7 +129,8 @@ export async function prepareGuiProfile(
       throw new Error("Existing GUI provider configuration differs from this checkout. It was not overwritten; use a new CONDUIT_GUI_HOME/CONDUIT_GUI_DATA_DIR or review it manually.")
     }
   }
-  return { configPath, catalogPath }
+  const studySkillPath = options.installStudy ? await installConduitStudySkill(options.repoRoot, options.home) : undefined
+  return { configPath, catalogPath, ...(studySkillPath && { studySkillPath }) }
 }
 
 export function guiLaunchArguments(app: string, options: Pick<GuiProfileOptions, "home" | "appData">): string[] {
@@ -160,7 +163,7 @@ export async function findOfficialGuiApp(userHome = homedir(), explicit?: string
   throw new Error("Official ChatGPT desktop app not found. Install it with brew install --cask chatgpt, or set CONDUIT_GUI_APP_PATH.")
 }
 
-export const GUI_HELP = `Usage: cxg [--help]
+export const GUI_HELP = `Usage: cxg [--install-study | --help]
 
 Open the official ChatGPT desktop GUI through Conduit (macOS).
 Default model: Astra, max reasoning, ${DEFAULT_CODEX_REASONING_SUMMARY} summaries, 872000 usable context, live search.
@@ -175,6 +178,10 @@ Personal Codex login/configuration is not replaced; existing managed GUI
 settings are preserved, including explicit reasoning choices.
 No debugging port is enabled by this launcher.
 
+--install-study  Install the optional Study (Conduit local) skill in this GUI
+                 profile, then open the app. In Work, type @study and select
+                 Study (Conduit local). This is not OpenAI's hosted Study Mode.
+
 Environment: CONDUIT_GUI_APP_PATH, CONDUIT_GUI_HOME, CONDUIT_GUI_DATA_DIR,
 CONDUIT_CODEX_BASE_URL (default ${DEFAULT_CODEX_BASE_URL}).
 `
@@ -185,7 +192,8 @@ export async function runConduitGui(argv: readonly string[], repoRoot: string): 
     return 0
   }
   try {
-    if (argv.length) throw new Error("Unknown GUI launcher argument. Use cxg --help.")
+    const installStudy = argv.length === 1 && argv[0] === "--install-study"
+    if (argv.length && !installStudy) throw new Error("Unknown GUI launcher argument. Use cxg --help.")
     if (process.platform !== "darwin") throw new Error("This GUI launcher currently supports macOS only.")
     const userHome = homedir()
     const app = await findOfficialGuiApp(userHome, process.env.CONDUIT_GUI_APP_PATH)
@@ -195,10 +203,14 @@ export async function runConduitGui(argv: readonly string[], repoRoot: string): 
       home: resolve(process.env.CONDUIT_GUI_HOME ?? join(userHome, ".codex-conduit-gui")),
       appData: resolve(process.env.CONDUIT_GUI_DATA_DIR ?? join(userHome, "Library", "Application Support", "Conduit ChatGPT")),
       baseUrl: normalizeCodexBaseUrl(process.env.CONDUIT_CODEX_BASE_URL ?? DEFAULT_CODEX_BASE_URL),
+      installStudy,
     }
-    await prepareGuiProfile(options)
+    const { studySkillPath } = await prepareGuiProfile(options)
     await execute("open", guiLaunchArguments(app, options))
     console.log("Opened the official ChatGPT app with the dedicated Conduit profile. Select ChatGPT Work or Codex for local tasks.")
+    if (studySkillPath) {
+      console.log("Conduit Study is installed. In Work, type @study and select Study (Conduit local). This is a local learning workflow, not OpenAI's hosted Study Mode.")
+    }
     return 0
   } catch (error) {
     console.error(`cxg: ${error instanceof Error ? error.message : String(error)}`)

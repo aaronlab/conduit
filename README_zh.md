@@ -94,6 +94,11 @@ Astra 的目录与启动器默认请求 `detailed` 推理摘要；摘要开关�
 支持范围、界面推理标签的已知问题，以及网页登录/云端功能的区别，见
 [GUI 专项说明](./docs/CODEX.md#official-desktop-gui-through-conduit-macos)。
 
+如需继续通过 Copilot 进行引导式学习，可运行 `./bin/cxg --install-study`，
+然后在 Work 输入 `@study` 并选择 **Study (Conduit local)**。
+这是明确标注、需要主动选择的本地学习工作流，**不是 OpenAI 官方云端学习模式**。
+原版入口与本地版的区别见 [学习模式说明](./docs/CODEX.md#study-mode-and-local-guided-learning)。
+
 ### 使用 Claude Code
 
 请从当前账户实际可用的模型中选择：
