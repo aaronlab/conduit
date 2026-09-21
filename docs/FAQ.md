@@ -31,6 +31,15 @@ The latter two execute tools locally; the proxy does not manufacture a hosted
 computer service. The desktop pass does not imply that every app or workflow
 has been tested. See [desktop setup and evidence](./CODEX.md#computer-setup-and-current-verification-boundary).
 
+## Why is a web `@Study` entry missing from the desktop app?
+
+The tested Conduit desktop profile uses local Work/Codex, not hosted ChatGPT
+Chat. Its plugin directory had no matching Study package. An `@` mention can
+refer to a plugin or a bundled skill, so identify the exact web entry before
+assuming it is OpenAI's separate Study-mode feature or a portable plugin.
+No official installation route for that exact entry has been verified in
+this profile. See [the investigation and support boundary](./CODEX.md#a-web-study-entry-is-not-automatically-a-local-plugin).
+
 ## Does this bypass Anthropic's rate limits?
 
 Conduit doesn't bypass anything — your requests hit Copilot, which has its own per-user limits. If you're a Copilot Business or Enterprise user those limits are generally higher. Heavy `thinking` usage (Opus 4.7 with big prompts) is what eats the budget fastest.

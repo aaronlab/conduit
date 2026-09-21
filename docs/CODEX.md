@@ -319,6 +319,37 @@ Official references:
 [authentication](https://learn.chatgpt.com/docs/auth#alternative-model-providers),
 [local Work/external-provider boundaries](https://learn.chatgpt.com/docs/amazon-bedrock).
 
+### A web `@Study` entry is not automatically a local plugin
+
+On desktop **26.915.31945** with this external-provider profile, the actual
+public plugin-directory search for `study` returned **no plugins found**.
+There was also no Study package among the bundled plugins or installed local
+skills. No installable official Study package was verified. This is a
+version/profile-specific observation, not proof that every desktop or account
+is incompatible.
+
+Do not conflate these different things:
+
+- OpenAI's [Study mode / Study and learn](https://help.openai.com/en/articles/11780217),
+  a guided-learning experience documented for ChatGPT web, iOS and Android.
+- A specific web `@study` mention. According to the
+  [plugin guide](https://learn.chatgpt.com/docs/plugins), `@` can identify a
+  plugin or one of its bundled skills; the mention alone is not a package ID.
+- A custom GPT or a homemade tutoring skill, neither of which proves that the
+  original official feature has been installed.
+
+The current Conduit route runs **local Work/Codex**, not hosted ChatGPT Chat.
+Forwarding Responses does not itself supply a hosted Chat feature, its account
+access, or its service implementation. The universal plugin directory only
+promises availability on each plugin's supported surfaces.
+
+To investigate a missing web entry, first obtain its exact detail URL or a
+screenshot showing its name and developer, then check its supported surfaces,
+authentication and installation source. Never copy login cookies or tokens
+to make an unrelated plugin appear authenticated. Until that exact entry and
+a supported local installation path are verified, use the existing working
+web entry; do not report a generic tutoring prompt as an installation fix.
+
 ## Visible reasoning summaries
 
 Astra advertises `supports_reasoning_summary_parameter: true` in the Codex
