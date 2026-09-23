@@ -143,6 +143,20 @@ claude
   search, so Claude Code's WebSearch runs through Copilot's native search on
   `gpt-6-sol` (else `gpt-5.6-sol`, `gpt-6-luna`, `gpt-5.6-sol-fast`; override
   with `CONDUIT_WEB_SEARCH_MODEL`). Results return as Anthropic search blocks.
+- **Browser:** Claude Code's built-in Claude in Chrome (`--chrome`) requires a
+  claude.ai subscription login and is switched off when a gateway such as
+  Conduit is configured. Use Chrome DevTools MCP instead; it drives your
+  running Chrome through the same Copilot model:
+
+  ```bash
+  claude mcp add --scope user chrome-devtools -- npx -y chrome-devtools-mcp@1.9.0 \
+    --autoConnect --no-usage-statistics \
+    --screenshotFormat=jpeg --screenshotQuality=80 --screenshotMaxWidth=1568
+  ```
+
+  Enable remote debugging once at `chrome://inspect/#remote-debugging`, then
+  click **Allow** when Chrome asks. Navigation, screenshots and image
+  understanding were verified through Conduit with an isolated headless Chrome.
 
 Non-Claude models use the existing translation path. Newly published Claude
 models are picked up without a restart; unavailable Claude aliases still fall
@@ -160,6 +174,7 @@ before relying on an old model name.
 | Opaque reasoning, instructions, schemas and future Responses fields | Native passthrough |
 | Hosted `web_search` | Verified on Sol and Astra (including max effort); upstream/model dependent |
 | Claude Code WebSearch on Claude models | Bridged to Copilot native search (Anthropic's server tool is rejected upstream) |
+| Claude Code browser control | Chrome DevTools MCP verified (headless); built-in Claude in Chrome needs claude.ai login, unavailable via gateways |
 | CLI browser automation | Verified with isolated Playwright MCP |
 | Desktop Work local `@Computer` plugin | Verified on a controlled macOS app with Astra / max; requires OS and per-app permissions |
 | Hosted Responses `computer` / `computer_use_preview` | **Rejected by Copilot in live probes** |

@@ -16,6 +16,10 @@ All notable changes to Conduit are documented here. Format follows [Keep a Chang
   verified as native-search models.
 - `POST /v1/messages/count_tokens` for Claude models, used by Claude Code's
   `/context` and size checks.
+- Documented Claude Code browser control through Conduit with Chrome DevTools
+  MCP (`--autoConnect` to the running Chrome), verified with navigation,
+  screenshots and image understanding. Claude Code's own Claude in Chrome is
+  unavailable through gateways by design.
 - Anthropic-format `/v1/models` (when `anthropic-version` is sent) with
   Anthropic Claude ids, for Claude Code gateway model discovery. Codex and
   OpenAI listings are unchanged.

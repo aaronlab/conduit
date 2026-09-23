@@ -169,6 +169,20 @@ Copilot publishes a 1,000,000-token window but 872,000 prompt tokens for
 `claude-opus-5-5[1m]` so Claude Code accepts a large window, and
 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=872000` so it compacts before the prompt limit.
 
+## Can Claude Code use Claude in Chrome through Conduit?
+
+No. Claude Code enables its built-in Claude in Chrome integration (`--chrome`)
+only for a claude.ai subscription login with suitable OAuth scopes, and it
+switches claude.ai login off whenever `ANTHROPIC_AUTH_TOKEN` or a custom
+`ANTHROPIC_BASE_URL` is set, so `--chrome` is silently skipped. Conduit does not
+bypass that entitlement check.
+
+To let the Copilot model control Chrome, add Chrome DevTools MCP as shown in the
+README. With `--autoConnect` it uses your running Chrome, including its open
+tabs and signed-in sites, after you enable remote debugging at
+`chrome://inspect/#remote-debugging` and allow the connection. Until then, its
+tools report `Could not find DevToolsActivePort`.
+
 ## What about Anthropic's 200K / 400K / 1M pricing tiers?
 
 Requests are billed by GitHub under your actual Copilot plan, not by an

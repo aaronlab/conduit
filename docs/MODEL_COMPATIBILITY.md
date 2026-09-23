@@ -45,6 +45,8 @@ Copilot probes. Copilot currently publishes one Claude model, `claude-opus-5.5`.
 | Per-message `output_config` (per-turn effort) | Rejected, even with its beta |
 | `safeguards` (server-side auto-mode classifier) | Rejected; Claude Code falls back to its local classifier |
 | `/v1/messages/count_tokens` | Supported (except server tools) |
+| Images per request | Several accepted (3 screenshots in tool results passed), although metadata lists `max_prompt_images: 1` |
+| Claude Code's Claude in Chrome (`--chrome`) | Not available: Claude Code requires a claude.ai OAuth login and disables it with `ANTHROPIC_AUTH_TOKEN` or a custom base URL |
 
 With `claude-opus-5-5[1m]`, `CLAUDE_CODE_EFFORT_LEVEL=max` and
 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=872000`, the captured requests carried

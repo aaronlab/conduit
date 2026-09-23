@@ -133,6 +133,18 @@ claude
   WebSearch 会改由 Copilot 原生搜索执行：优先 `gpt-6-sol`，其次 `gpt-5.6-sol`、
   `gpt-6-luna`、`gpt-5.6-sol-fast`，可用 `CONDUIT_WEB_SEARCH_MODEL` 指定；
   结果仍按 Anthropic 搜索结果块返回。
+- **浏览器：** Claude Code 自带的 Claude in Chrome（`--chrome`）要求用 claude.ai
+  订阅账号登录，并且只要配置了 Conduit 这类网关就会被关闭。可改用 Chrome
+  DevTools MCP，用同一个 Copilot 模型控制你正在使用的 Chrome：
+
+  ```bash
+  claude mcp add --scope user chrome-devtools -- npx -y chrome-devtools-mcp@1.9.0 \
+    --autoConnect --no-usage-statistics \
+    --screenshotFormat=jpeg --screenshotQuality=80 --screenshotMaxWidth=1568
+  ```
+
+  在 `chrome://inspect/#remote-debugging` 开启一次远程调试，Chrome 询问时点
+  **Allow**。打开网页、截图和看图已通过 Conduit 用隔离的无界面 Chrome 实测。
 
 其他模型保留原有翻译链路。Copilot 新上架的 Claude 模型无需重启即可使用；
 不可用的 Claude 别名仍回退到 Sol。支持 `/v1/messages/count_tokens`；开启
@@ -149,6 +161,7 @@ Claude 模型以 Anthropic ID 列出。旧模型名称与兼容处理见
 | 加密推理、指令、结构化输出及新增 Responses 字段 | 原生透传 |
 | 原生 `web_search` | Sol、Astra（包括 max 思考）实测通过，仍取决于上游和模型 |
 | Claude 模型下 Claude Code 的 WebSearch | 桥接到 Copilot 原生搜索（上游拒绝 Anthropic 服务端搜索工具） |
+| Claude Code 浏览器操作 | Chrome DevTools MCP 实测通过（无界面）；自带 Claude in Chrome 需 claude.ai 登录，经网关不可用 |
 | CLI 浏览器操作 | 隔离的 Playwright MCP 实测通过 |
 | 桌面 Work 的本地 `@Computer` 插件 | Astra / max 操作独立 macOS 测试窗口通过；需系统权限及逐应用授权 |
 | 托管 Responses `computer` / `computer_use_preview` | **Copilot 实测返回不支持** |
