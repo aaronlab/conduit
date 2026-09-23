@@ -9,6 +9,7 @@ import { createResponses } from "../src/services/copilot/create-responses"
 import { createCompatibleChatCompletions } from "../src/services/copilot/create-chat-completions"
 import { state } from "../src/lib/state"
 import { HTTPError } from "../src/lib/error"
+import { claudeModel, nativeModel } from "./codex-fixtures"
 
 const app = new Hono().route("/v1/messages", messageRoutes)
 const request = {
@@ -85,10 +86,56 @@ describe("preserved Anthropic search integration", () => {
   })
 
   it("fails clearly if no backend can provide a translated server tool", async () => {
+    state.models = { object: "list", data: [nativeModel("chat-only-model", { supported_endpoints: ["/chat/completions"] })] }
     const response = await post({ ...request, model: "chat-only-model" })
     expect(response.status).toBe(400)
     expect(await response.text()).toContain("unsupported_feature")
+    expect(createResponses).not.toHaveBeenCalled()
     expect(createCompatibleChatCompletions).not.toHaveBeenCalled()
+  })
+
+  it("bridges Claude searches, which Copilot's Messages API rejects, through a native-search model", async () => {
+    state.models = { object: "list", data: [claudeModel(), nativeModel("gpt-5.6-sol"), nativeModel("gpt-6-sol")] }
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+    vi.mocked(createResponses).mockResolvedValue({ ...nativeSearch, model: "gpt-6-sol" })
+    const response = await post({ ...request, model: "claude-opus-5-5" })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      model: "claude-opus-5-5",
+      content: [
+        { type: "server_tool_use", name: "web_search" },
+        { type: "web_search_tool_result", content: [{ url: "https://github.com/openai/codex" }] },
+        { type: "text", text: "Official repository" },
+      ],
+      usage: { server_tool_use: { web_search_requests: 1 } },
+    })
+    expect(createResponses).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "gpt-6-sol", tools: [{ type: "web_search", filters: { allowed_domains: ["github.com"] } }] }),
+      expect.anything(),
+    )
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("bridges searches for an unavailable Claude alias instead of using its Sol fallback as-is", async () => {
+    state.models = { object: "list", data: [nativeModel("gpt-5.6-sol"), nativeModel("gpt-6-sol")] }
+    vi.stubEnv("CONDUIT_WEB_SEARCH_MODEL", "gpt-6-sol")
+    vi.mocked(createResponses).mockResolvedValue({ ...nativeSearch, model: "gpt-6-sol" })
+    const response = await post({ ...request, model: "claude-haiku-4-5-20251001" })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ model: "claude-haiku-4-5-20251001" })
+    expect(createResponses).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-6-sol" }), expect.anything())
+  })
+
+  it("streams bridged Claude searches with the requested model and honors CONDUIT_WEB_SEARCH_MODEL", async () => {
+    state.models = { object: "list", data: [claudeModel(), nativeModel("gpt-5.6-sol"), nativeModel("gpt-6-sol")] }
+    vi.stubEnv("CONDUIT_WEB_SEARCH_MODEL", "gpt-5.6-sol")
+    vi.mocked(createResponses).mockResolvedValue(nativeSearch)
+    const text = await (await post({ ...request, model: "claude-opus-5-5[1m]", stream: true })).text()
+    expect(createResponses).toHaveBeenCalledWith(expect.objectContaining({ model: "gpt-5.6-sol" }), expect.anything())
+    expect(text).toContain('"model":"claude-opus-5-5[1m]"')
+    expect(text).toContain("web_search_tool_result")
+    expect(text).toContain("event: message_stop")
   })
 
   it.each([null, {}, { model: 42, messages: [] }, { model: "x", messages: [], tools: {} }])("validates invalid message requests: %j", async (body) => {

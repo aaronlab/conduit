@@ -61,6 +61,13 @@ WebSocket transport are disabled in the recommended configuration.
                        Anthropic endpoint)        endpoint)
 ```
 
+Before routing, a request carrying Anthropic's `web_search_*` server tool
+(Claude Code's WebSearch sub-request) is executed with Copilot's native
+Responses `web_search`: on the requested model when it is a verified
+native-search model, otherwise on a bridge model, because Copilot's Claude
+endpoint rejects the server tool. `/v1/messages/count_tokens` uses the same
+passthrough normalization against Copilot's counting endpoint.
+
 ## Key files
 
 ### `packages/proxy/src/`
@@ -77,7 +84,8 @@ WebSocket transport are disabled in the recommended configuration.
 | `lib/responses-stream.ts` | Typed events, completion recovery and premature-EOF detection |
 | `lib/responses-bridge.ts` | Chat-to-Responses adaptation, selected using live supported endpoints |
 | `util/sse.ts` | Shared incremental UTF-8 and CR/LF/CRLF framing |
-| `routes/messages/passthrough.ts` | Anthropic → Copilot native `/v1/messages` |
+| `routes/messages/passthrough.ts` | Anthropic → Copilot native `/v1/messages` and `count_tokens`; metadata-aware effort, thinking and beta compatibility |
+| `routes/messages/web-search.ts` | Anthropic web search ↔ Copilot native Responses search bridge |
 | `routes/messages/translate.ts` | Anthropic → OpenAI Chat Completions fallback |
 | `routes/messages/handler.ts` | Dispatches between passthrough and translate |
 | `services/github/` | OAuth Device Flow + Copilot JWT refresh |

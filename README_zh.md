@@ -15,7 +15,7 @@ Conduit 是本地、非官方的 Copilot 代理。Codex 走原生 Responses 协�
 自定义 `apply_patch`、图像、工具输出或加密推理状态降级成普通聊天消息；
 现有 Claude Messages 透传及其兼容处理继续保留。
 
-**本次对照并实测的是 Codex CLI 0.155.1，验证日期为 2026-09-20。**
+**本次对照并实测的是 Codex CLI 0.155.1（2026-09-20）和 Claude Code 2.1.280 + Claude Opus 5.5（2026-09-23）。**
 这不代表 Copilot 提供了 OpenAI 的所有服务。模型可用性、工具、额度和计费，
 仍由 GitHub 及你的组织策略决定。
 
@@ -101,20 +101,44 @@ Astra 的目录与启动器默认请求 `detailed` 推理摘要；摘要开关�
 
 ### 使用 Claude Code
 
-请从当前账户实际可用的模型中选择：
+**Claude Opus 5.5 · Max 思考 · 872k 上下文**（2026-09-23 用 Claude Code 2.1.280 实测）：
 
 ```bash
 unset ANTHROPIC_API_KEY
 export ANTHROPIC_BASE_URL=http://127.0.0.1:7133
 export ANTHROPIC_AUTH_TOKEN="$(cat .conduit-key)"
-export ANTHROPIC_MODEL=<当前可用的模型 ID>
+export ANTHROPIC_MODEL='claude-opus-5-5[1m]'
+# Opus/Sonnet/Haiku/Fable 档（子代理、WebFetch、后台调用、/model 别名）也固定到
+# Opus 5.5；Copilot 目前不提供其他 Claude 模型。
+export ANTHROPIC_DEFAULT_OPUS_MODEL='claude-opus-5-5[1m]'
+export ANTHROPIC_DEFAULT_SONNET_MODEL='claude-opus-5-5[1m]'
+export ANTHROPIC_DEFAULT_HAIKU_MODEL='claude-opus-5-5[1m]'
+export ANTHROPIC_DEFAULT_FABLE_MODEL='claude-opus-5-5[1m]'
+export CLAUDE_CODE_EFFORT_LEVEL=max
+export CLAUDE_CODE_AUTO_COMPACT_WINDOW=872000
 claude
 ```
 
-可用的 Claude 模型继续走原生 Messages 接口；其他模型保留原有翻译链路。
-Claude 别名不可用时的既有回退逻辑，以及
-`Anthropic web_search_* -> Sol /responses web_search` 适配也保留。
-旧模型名称与兼容处理见 [模型兼容说明](./docs/MODEL_COMPATIBILITY.md)。
+- **版本：** 需要 Claude Code **2.1.280 或更新**。旧版本会被 Anthropic 拒绝
+  （`claude_code_version_too_old`）。npm 可能落后于原生发布通道，
+  可用 `claude install latest` 安装原生版本。
+- **模型：** 使用 Anthropic 的 ID `claude-opus-5-5`，Claude Code 才会启用 Opus 5.5
+  的全部能力；Conduit 转发给 Copilot 时改写为 `claude-opus-5.5`。
+- **思考强度：** `/effort max` 只对当前会话生效，所以用环境变量固定 `max`；
+  Conduit 会原样转发 Copilot 为该模型公布的所有档位。
+- **上下文：** 自定义 base URL 且不带 `[1m]` 时，Claude Code 只按 200k 计算。
+  Copilot 允许 872,000 个提示词 token（1M 窗口减去 128k 输出），因此自动压缩窗口
+  设为正好 872k，`/context` 显示为 `…/872k`。
+- **搜索：** Copilot 的 Claude 接口不支持 Anthropic 服务端搜索工具，Claude Code 的
+  WebSearch 会改由 Copilot 原生搜索执行：优先 `gpt-6-sol`，其次 `gpt-5.6-sol`、
+  `gpt-6-luna`、`gpt-5.6-sol-fast`，可用 `CONDUIT_WEB_SEARCH_MODEL` 指定；
+  结果仍按 Anthropic 搜索结果块返回。
+
+其他模型保留原有翻译链路。Copilot 新上架的 Claude 模型无需重启即可使用；
+不可用的 Claude 别名仍回退到 Sol。支持 `/v1/messages/count_tokens`；开启
+Claude Code 网关模型发现（`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`）时，
+Claude 模型以 Anthropic ID 列出。旧模型名称与兼容处理见
+[模型兼容说明](./docs/MODEL_COMPATIBILITY.md)。
 
 ## 哪些能力已经验证
 
@@ -124,6 +148,7 @@ Claude 别名不可用时的既有回退逻辑，以及
 | 多轮函数、自定义工具、MCP 工具结果 | 保留原协议，支持图像结果 |
 | 加密推理、指令、结构化输出及新增 Responses 字段 | 原生透传 |
 | 原生 `web_search` | Sol、Astra（包括 max 思考）实测通过，仍取决于上游和模型 |
+| Claude 模型下 Claude Code 的 WebSearch | 桥接到 Copilot 原生搜索（上游拒绝 Anthropic 服务端搜索工具） |
 | CLI 浏览器操作 | 隔离的 Playwright MCP 实测通过 |
 | 桌面 Work 的本地 `@Computer` 插件 | Astra / max 操作独立 macOS 测试窗口通过；需系统权限及逐应用授权 |
 | 托管 Responses `computer` / `computer_use_preview` | **Copilot 实测返回不支持** |
@@ -163,6 +188,7 @@ bun run test:codex --model gpt-5.4-mini --browser
 | `CONDUIT_TOKEN_PATH` | `packages/proxy/data/github_token` | GitHub token 文件 |
 | `CONDUIT_DB_PATH` | `data/conduit.db` | 相对代理进程工作目录的数据库路径 |
 | `CONDUIT_BASE_URL` | 空 | 对外展示的代理地址 |
+| `CONDUIT_WEB_SEARCH_MODEL` | `gpt-6-sol`、`gpt-5.6-sol`、`gpt-6-luna`、`gpt-5.6-sol-fast` 中第一个可用的 | 为没有原生搜索的模型（如 Claude）执行 Anthropic 搜索的原生搜索模型 |
 
 GitHub token 与客户端访问 Conduit 的 key 是两种不同凭据。
 不要提交凭据、生成的模型目录或数据库。
@@ -173,8 +199,9 @@ GitHub token 与客户端访问 Conduit 的 key 是两种不同凭据。
 |---|---|---|
 | POST | `/v1/responses` | 原生 Copilot Responses，支持 SSE |
 | GET | `/v1/models?client_version=0.155.1` | Codex `ModelInfo` 模型目录 |
-| GET | `/v1/models` | OpenAI 格式的模型列表 |
+| GET | `/v1/models` | OpenAI 格式的模型列表（带 `anthropic-version` 时返回 Anthropic 格式） |
 | POST | `/v1/messages` | Anthropic Messages |
+| POST | `/v1/messages/count_tokens` | Anthropic token 计数（Claude 模型） |
 | POST | `/v1/chat/completions` | Chat Completions；按最新模型元数据选择 Responses 桥接 |
 | GET | `/health` | 健康检查 |
 | GET | `/api/copilot/models?refresh=true` | 刷新 Copilot 模型能力 |

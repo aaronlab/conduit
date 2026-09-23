@@ -42,6 +42,20 @@ export function resolveModelName(
 }
 
 /**
+ * Inverse of translateModelName for Copilot's Claude ids, used when listing
+ * models to Anthropic clients: claude-opus-5.5 → claude-opus-5-5,
+ * claude-opus-4.6-1m → claude-opus-4-6[1m]. Other ids are returned unchanged.
+ */
+export function toAnthropicModelId(copilotId: string): string {
+  const match = copilotId.match(/^(claude-(?:opus|sonnet|haiku))-(\d+)\.(\d{1,2})(?:-(1m|fast|high|xhigh))?$/)
+  if (!match) return copilotId
+  const [, family, major, minor, suffix] = match
+  const base = `${family}-${major}-${minor}`
+  if (suffix === "1m") return `${base}[1m]`
+  return suffix ? `${base}-${suffix}` : base
+}
+
+/**
  * Translate Anthropic SDK model names to Copilot model IDs.
  * Only modifies the model name string, nothing else.
  *

@@ -6,8 +6,9 @@ import { state } from "../../lib/state"
 import { logEmitter } from "../../util/log-emitter"
 import { generateRequestId } from "../../util/id"
 import { extractErrorDetails, forwardError, HTTPError, InvalidRequestError } from "../../lib/error"
-import { getRouteStrategy, resolveModelName } from "../../lib/model-router"
-import { passthroughToMessages } from "./passthrough"
+import { getRouteStrategy, resolveModelName, translateModelName } from "../../lib/model-router"
+import { refreshModelsIfMissing } from "../../lib/utils"
+import { passthroughToCountTokens, passthroughToMessages } from "./passthrough"
 import {
   translateToOpenAI,
   translateToAnthropic,
@@ -26,7 +27,7 @@ import {
   buildNativeWebSearchResponse,
   buildNativeWebSearchPayload,
   extractWebSearchQuery,
-  supportsNativeWebSearch,
+  selectWebSearchModel,
   webSearchResponseToSSE,
 } from "./web-search"
 
@@ -70,6 +71,8 @@ export async function handleMessages(c: Context) {
   const stream = !!payload.stream
   const thinking = isRecord(payload.thinking) ? payload.thinking.type ?? null : null
   const effort = isRecord(payload.output_config) ? payload.output_config.effort ?? null : null
+  const translatedModel = translateModelName(model, anthropicBeta)
+  if (getRouteStrategy(translatedModel) === "passthrough") await refreshModelsIfMissing(translatedModel)
   const availableModelIds = state.models?.data.map((available) => available.id) ?? null
   const resolvedModel = resolveModelName(model, availableModelIds, anthropicBeta)
 
@@ -95,10 +98,13 @@ export async function handleMessages(c: Context) {
   // Web Search interception
   //
   // Claude Code sends a dedicated sub-request for web search with a server tool
-  // ({type: "web_search_20250305"}) in the tools array. For verified models,
-  // translate that request to Copilot's native Responses `web_search` tool.
+  // ({type: "web_search_20250305"}) in the tools array. Copilot's Claude Messages
+  // endpoint rejects that server tool, so the search always runs through
+  // Copilot's native Responses `web_search` tool: on the requested model when it
+  // is a verified native-search model, otherwise on a bridge search model
+  // (CONDUIT_WEB_SEARCH_MODEL or the first available WEB_SEARCH_BRIDGE_MODELS).
   //
-  // Tavily remains a fallback for older models that do not expose native search.
+  // Tavily remains a fallback when no native backend is available or it fails.
   // Both backends return Anthropic-native server_tool_use,
   // web_search_tool_result, and text blocks that Claude Code expects.
   // ---------------------------------------------------------------------------
@@ -118,11 +124,17 @@ export async function handleMessages(c: Context) {
       const srvId = `srvtoolu_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
       let responseBody: ReturnType<typeof buildNativeWebSearchResponse> | null = null
       let searchBackend: "copilot-native" | "tavily" | null = null
+      // Select from the requested model, not the unavailable-Claude fallback.
+      const searchModel = selectWebSearchModel(
+        translatedModel,
+        state.models?.data.map((available) => available.id) ?? null,
+        process.env.CONDUIT_WEB_SEARCH_MODEL,
+      )
 
-      if (supportsNativeWebSearch(resolvedModel)) {
+      if (searchModel) {
         try {
           const nativeResponse = await createResponses(
-            buildNativeWebSearchPayload(resolvedModel, query, webSearchServerTool),
+            buildNativeWebSearchPayload(searchModel, query, webSearchServerTool),
             { signal: c.req.raw.signal },
           ) as Parameters<typeof buildNativeWebSearchResponse>[0]
           responseBody = buildNativeWebSearchResponse(nativeResponse, {
@@ -130,6 +142,7 @@ export async function handleMessages(c: Context) {
             requestedModel: model,
             requestedQuery: query,
             serverToolUseId: srvId,
+            ...(searchModel !== translatedModel && { responseModel: model }),
           })
           searchBackend = "copilot-native"
         } catch (error) {
@@ -210,9 +223,10 @@ export async function handleMessages(c: Context) {
         const latencyMs = Math.round(performance.now() - startTime)
         logEmitter.emitLog({
           ts: Date.now(), level: "info", type: "request_end", requestId,
-          msg: `200 web_search (${searchBackend}) ${latencyMs}ms`,
+          msg: `200 web_search (${searchBackend}${searchBackend === "copilot-native" ? ` via ${searchModel}` : ""}) ${latencyMs}ms`,
           data: {
-            path: "/v1/messages", format: "anthropic", model, resolvedModel,
+            path: "/v1/messages", format: "anthropic", model,
+            resolvedModel: searchBackend === "copilot-native" ? searchModel : resolvedModel,
             strategy: `web_search_${searchBackend}`,
             inputTokens: responseBody.usage.input_tokens,
             outputTokens: responseBody.usage.output_tokens,
@@ -445,6 +459,57 @@ export async function handleMessages(c: Context) {
         status: "error", statusCode, error: errorDetail,
         sessionId, clientName, clientVersion,
       },
+    })
+    return forwardError(c, error)
+  }
+}
+
+/**
+ * Anthropic token counting (used by Claude Code's /context and size checks).
+ * Claude models are counted by Copilot's native endpoint; translated models
+ * have no upstream counter, so clients fall back to their local estimate.
+ */
+export async function handleCountTokens(c: Context) {
+  try {
+    await checkRateLimit(state)
+  } catch (error) {
+    return forwardError(c, error)
+  }
+
+  const anthropicBeta = c.req.header("anthropic-beta") ?? null
+  const rawBody = await c.req.text()
+  let model: string
+  try {
+    const parsed: unknown = JSON.parse(rawBody)
+    if (!isRecord(parsed) || typeof parsed.model !== "string" || !parsed.model.trim() || !Array.isArray(parsed.messages)) {
+      throw new InvalidRequestError("A model string and messages array are required.")
+    }
+    model = parsed.model
+  } catch (error) {
+    return forwardError(c, error instanceof SyntaxError ? new InvalidRequestError("Invalid JSON.") : error)
+  }
+
+  const translatedModel = translateModelName(model, anthropicBeta)
+  if (getRouteStrategy(translatedModel) === "passthrough") await refreshModelsIfMissing(translatedModel)
+  const resolvedModel = resolveModelName(model, state.models?.data.map((available) => available.id) ?? null, anthropicBeta)
+  if (getRouteStrategy(resolvedModel) !== "passthrough") {
+    return c.json({
+      type: "error",
+      error: {
+        type: "not_found_error",
+        message: `Token counting is only available for Claude models; ${resolvedModel} is served through a translated API.`,
+      },
+    }, 404)
+  }
+
+  try {
+    const response = await passthroughToCountTokens(rawBody, model, anthropicBeta)
+    return c.json(await response.json())
+  } catch (error) {
+    logEmitter.emitLog({
+      ts: Date.now(), level: "warn", type: "upstream_error", requestId: null,
+      msg: `count_tokens ${model} failed`,
+      data: { error: extractErrorDetails(error).errorDetail },
     })
     return forwardError(c, error)
   }

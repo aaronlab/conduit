@@ -16,7 +16,8 @@ requests for Codex instead of converting function tools, custom `apply_patch`,
 images or encrypted reasoning into a less capable chat protocol. Claude's
 Messages route and its model-specific compatibility shims remain available.
 
-**Verified with Codex CLI 0.155.1 on 2026-09-20.** This does not make every OpenAI
+**Verified with Codex CLI 0.155.1 on 2026-09-20 and Claude Code 2.1.280 (Claude
+Opus 5.5) on 2026-09-23.** This does not make every OpenAI
 hosted service available on Copilot. Model access, tools, limits and billing are
 controlled by GitHub and your organization.
 
@@ -109,20 +110,45 @@ Study Mode. See [Study setup and boundaries](./docs/CODEX.md#study-mode-and-loca
 
 ### Claude Code
 
-Choose models actually available in your account's catalog:
+**Claude Opus 5.5 · Max effort · 872k context** (verified on 2026-09-23 with
+Claude Code 2.1.280):
 
 ```bash
 unset ANTHROPIC_API_KEY
 export ANTHROPIC_BASE_URL=http://127.0.0.1:7133
 export ANTHROPIC_AUTH_TOKEN="$(cat .conduit-key)"
-export ANTHROPIC_MODEL=<available-model-id>
+export ANTHROPIC_MODEL='claude-opus-5-5[1m]'
+# Pin the Opus/Sonnet/Haiku/Fable slots (subagents, WebFetch, background calls,
+# /model aliases) too; Copilot publishes no other Claude model.
+export ANTHROPIC_DEFAULT_OPUS_MODEL='claude-opus-5-5[1m]'
+export ANTHROPIC_DEFAULT_SONNET_MODEL='claude-opus-5-5[1m]'
+export ANTHROPIC_DEFAULT_HAIKU_MODEL='claude-opus-5-5[1m]'
+export ANTHROPIC_DEFAULT_FABLE_MODEL='claude-opus-5-5[1m]'
+export CLAUDE_CODE_EFFORT_LEVEL=max
+export CLAUDE_CODE_AUTO_COMPACT_WINDOW=872000
 claude
 ```
 
-Available Claude models use the native Messages endpoint. Non-Claude models
-use the existing translation path. The existing fallback for unavailable
-Claude aliases and the Anthropic `web_search_*` to Sol native-search bridge
-are preserved. Review [model compatibility](./docs/MODEL_COMPATIBILITY.md)
+- **Version:** Claude Code **2.1.280 or newer** is required. Anthropic rejects
+  older clients for this model (`claude_code_version_too_old`). npm may lag
+  behind the native channel; `claude install latest` installs the native build.
+- **Model:** use Anthropic's id `claude-opus-5-5` so Claude Code applies its
+  Opus 5.5 capabilities; Conduit sends Copilot's `claude-opus-5.5`.
+- **Effort:** `max` is session-only in `/effort`, so the environment variable
+  pins it. Conduit forwards every effort level Copilot publishes for the model.
+- **Context:** without `[1m]`, Claude Code assumes 200k for a custom base URL.
+  Copilot allows 872,000 prompt tokens (1M window minus 128k output), so the
+  auto-compact window is set to exactly that. `/context` then reports `…/872k`.
+- **Search:** Copilot's Claude endpoint rejects Anthropic's server-side web
+  search, so Claude Code's WebSearch runs through Copilot's native search on
+  `gpt-6-sol` (else `gpt-5.6-sol`, `gpt-6-luna`, `gpt-5.6-sol-fast`; override
+  with `CONDUIT_WEB_SEARCH_MODEL`). Results return as Anthropic search blocks.
+
+Non-Claude models use the existing translation path. Newly published Claude
+models are picked up without a restart; unavailable Claude aliases still fall
+back to Sol. `/v1/messages/count_tokens` is supported, and Claude Code's gateway
+model discovery (`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`) lists Claude
+models under Anthropic ids. Review [model compatibility](./docs/MODEL_COMPATIBILITY.md)
 before relying on an old model name.
 
 ## Capabilities and boundaries
@@ -133,6 +159,7 @@ before relying on an old model name.
 | Multi-turn function/custom/MCP tool outputs | Preserved, including images |
 | Opaque reasoning, instructions, schemas and future Responses fields | Native passthrough |
 | Hosted `web_search` | Verified on Sol and Astra (including max effort); upstream/model dependent |
+| Claude Code WebSearch on Claude models | Bridged to Copilot native search (Anthropic's server tool is rejected upstream) |
 | CLI browser automation | Verified with isolated Playwright MCP |
 | Desktop Work local `@Computer` plugin | Verified on a controlled macOS app with Astra / max; requires OS and per-app permissions |
 | Hosted Responses `computer` / `computer_use_preview` | **Rejected by Copilot in live probes** |
@@ -174,6 +201,7 @@ claiming success is not sufficient.
 | `CONDUIT_TOKEN_PATH` | `packages/proxy/data/github_token` | GitHub token location |
 | `CONDUIT_DB_PATH` | `data/conduit.db` | SQLite path, relative to the proxy process working directory |
 | `CONDUIT_BASE_URL` | empty | Advertised base URL |
+| `CONDUIT_WEB_SEARCH_MODEL` | first available of `gpt-6-sol`, `gpt-5.6-sol`, `gpt-6-luna`, `gpt-5.6-sol-fast` | Native-search model that runs Anthropic web searches for models without native search (e.g. Claude) |
 
 Never use your GitHub token as the client-facing Conduit key. Keep credentials,
 generated catalogs and databases out of Git.
@@ -184,8 +212,9 @@ generated catalogs and databases out of Git.
 |---|---|---|
 | POST | `/v1/responses` | Native Copilot Responses, including SSE |
 | GET | `/v1/models?client_version=0.155.1` | Codex `ModelInfo` catalog |
-| GET | `/v1/models` | OpenAI-compatible model list |
+| GET | `/v1/models` | OpenAI-compatible model list (Anthropic format when `anthropic-version` is sent) |
 | POST | `/v1/messages` | Anthropic Messages |
+| POST | `/v1/messages/count_tokens` | Anthropic token counting (Claude models) |
 | POST | `/v1/chat/completions` | Chat Completions; dynamically routes Responses-only models |
 | GET | `/health` | Health check |
 | GET | `/api/copilot/models?refresh=true` | Refresh current Copilot model metadata |

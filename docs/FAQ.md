@@ -148,6 +148,27 @@ For `claude-opus-4.6` specifically, no. We've measured it accepting up to 1,000,
 
 For other models the limit is lower (168K for most Sonnet/Opus 4.5+, 136K for Haiku 4.5).
 
+## Claude Code says "does not support this model; version 2.1.280 or newer is required"
+
+Anthropic checks the Claude Code version for Claude Opus 5.5 even through
+Copilot. Update Claude Code; when npm has not published that version yet,
+`claude install latest` installs the native build.
+
+## Why does WebSearch in Claude Code use a GPT model?
+
+Copilot's Claude endpoint rejects Anthropic's server-side `web_search` tool.
+Conduit therefore runs the search with Copilot's native search on
+`gpt-6-sol` (or the next available bridge model, or `CONDUIT_WEB_SEARCH_MODEL`)
+and returns ordinary Anthropic search results to Claude, which still writes the
+answer. The dashboard's resolved model shows which model searched.
+
+## Why 872k and not 1M for Opus 5.5?
+
+Copilot publishes a 1,000,000-token window but 872,000 prompt tokens for
+`claude-opus-5.5`: the window minus its 128,000 output tokens. Use
+`claude-opus-5-5[1m]` so Claude Code accepts a large window, and
+`CLAUDE_CODE_AUTO_COMPACT_WINDOW=872000` so it compacts before the prompt limit.
+
 ## What about Anthropic's 200K / 400K / 1M pricing tiers?
 
 Requests are billed by GitHub under your actual Copilot plan, not by an

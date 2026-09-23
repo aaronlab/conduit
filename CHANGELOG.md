@@ -5,6 +5,20 @@ All notable changes to Conduit are documented here. Format follows [Keep a Chang
 ## [Unreleased]
 
 ### Added
+- Verified Claude Code 2.1.280 with Claude Opus 5.5 at max effort and an 872k
+  auto-compact window (`claude-opus-5-5[1m]`, `CLAUDE_CODE_EFFORT_LEVEL=max`,
+  `CLAUDE_CODE_AUTO_COMPACT_WINDOW=872000`), including WebSearch, WebFetch and
+  `/context`.
+- Claude Code WebSearch on Claude models: the Anthropic `web_search_*` server
+  tool, which Copilot rejects for Claude, runs on a native-search bridge model
+  (`CONDUIT_WEB_SEARCH_MODEL`, else `gpt-6-sol` → `gpt-5.6-sol` → `gpt-6-luna` →
+  `gpt-5.6-sol-fast`). `gpt-6-sol`, `gpt-6-luna` and `gpt-5.6-sol-fast` were
+  verified as native-search models.
+- `POST /v1/messages/count_tokens` for Claude models, used by Claude Code's
+  `/context` and size checks.
+- Anthropic-format `/v1/models` (when `anthropic-version` is sent) with
+  Anthropic Claude ids, for Claude Code gateway model discovery. Codex and
+  OpenAI listings are unchanged.
 - Verified official ChatGPT desktop local Work/Codex integration through
   Conduit, with the `cxg` launcher, isolated state, private command-backed
   authentication and preserved existing GUI/user settings.
@@ -29,6 +43,19 @@ All notable changes to Conduit are documented here. Format follows [Keep a Chang
   bridge and Anthropic search regression coverage.
 
 ### Fixed
+- `effort: "max"`/`"xhigh"` were downgraded to `high` for Claude models that
+  support them. Effort is now validated against Copilot's published list
+  (legacy mapping only when metadata is missing).
+- Claude Code's per-turn `output_config` on system messages caused a 400 and a
+  client retry on every session; the latest per-turn effort is now lifted to the
+  request.
+- `thinking.type: "disabled"` (rejected by Opus 5.5) is mapped to default
+  adaptive thinking at the lowest effort; other models returning that 400 are
+  learned and retried once.
+- `context_management` is forwarded with its `context-management-*` beta instead
+  of always being stripped (stripped again if the upstream rejects it).
+- Claude models published after startup fell back to Sol until a restart; a
+  missing Claude model now triggers a throttled model-list refresh.
 - Responses streams now handle fragmented UTF-8/CRLF, completed output items,
   explicit terminal errors and client cancellation. EOF alone is not success.
 - Image and agent-request classification now includes custom/function tool

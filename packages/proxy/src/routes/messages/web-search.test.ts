@@ -4,6 +4,7 @@ import {
   buildNativeWebSearchResponse,
   buildNativeWebSearchPayload,
   extractWebSearchQuery,
+  selectWebSearchModel,
   supportsNativeWebSearch,
   webSearchResponseToSSE,
 } from "./web-search"
@@ -129,5 +130,24 @@ describe("native web search bridge", () => {
     expect(() => buildNativeWebSearchResponse({ status: "failed", error: { message: "unavailable" } }, options)).toThrow("unavailable")
     expect(() => buildNativeWebSearchPayload("gpt-5.6-sol", "", {})).toThrow("non-empty")
     expect(() => buildNativeWebSearchPayload("gpt-5.6-sol", "query", { blocked_domains: ["example.com"] })).toThrow("cannot enforce")
+  })
+})
+describe("web search backend selection", () => {
+  const published = ["claude-opus-5.5", "gpt-5.6-sol", "gpt-6-sol"]
+
+  it("lets verified native-search models search themselves", () => {
+    expect(selectWebSearchModel("gpt-5.6-sol", published)).toBe("gpt-5.6-sol")
+    expect(selectWebSearchModel("gpt-5.6-sol", published, "gpt-6-sol")).toBe("gpt-5.6-sol")
+  })
+
+  it("bridges Claude and other models through the first published bridge model", () => {
+    expect(selectWebSearchModel("claude-opus-5.5", published)).toBe("gpt-6-sol")
+    expect(selectWebSearchModel("claude-opus-5.5", ["claude-opus-5.5", "gpt-5.6-sol"])).toBe("gpt-5.6-sol")
+    expect(selectWebSearchModel("gemini-3.8-flash", published)).toBe("gpt-6-sol")
+  })
+
+  it("prefers an explicit configuration and reports no backend when none is published", () => {
+    expect(selectWebSearchModel("claude-opus-5.5", published, " gpt-6-luna ")).toBe("gpt-6-luna")
+    expect(selectWebSearchModel("claude-opus-5.5", ["claude-opus-5.5"])).toBeNull()
   })
 })

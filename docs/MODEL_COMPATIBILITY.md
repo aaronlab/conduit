@@ -27,6 +27,31 @@ Codex requires native Responses, not the older Chat wire protocol.
   name, an explicit Chat `reasoning_effort`, including `none`, is respected.
   Sol's historical Chat default remains `max` only when no effort is supplied.
 
+## Claude Code / Claude Opus 5.5 (2026-09-23)
+
+Verified with Claude Code 2.1.280 through a Conduit instance and direct
+Copilot probes. Copilot currently publishes one Claude model, `claude-opus-5.5`.
+
+| Property | Copilot metadata / live result |
+|---|---|
+| Endpoint | `/v1/messages` passthrough (Claude Code sends Anthropic's `claude-opus-5-5`) |
+| Window / prompt / output | 1,000,000 / **872,000** / 128,000 tokens |
+| `effort` | `low`, `medium`, `high`, `xhigh`, `max` — all forwarded as requested |
+| `thinking` | `adaptive` (with `display`); `disabled` is **rejected** upstream |
+| Over-limit prompt | `400 prompt is too long: N tokens > 1000000 maximum` (Anthropic format) |
+| Client version | Claude Code **≥ 2.1.280**, else `claude_code_version_too_old` |
+| Anthropic `web_search_*` server tool | **Rejected** (`The use of the web search tool is not supported.`) |
+| `context_management` | Accepted only with its `context-management-*` beta header |
+| Per-message `output_config` (per-turn effort) | Rejected, even with its beta |
+| `safeguards` (server-side auto-mode classifier) | Rejected; Claude Code falls back to its local classifier |
+| `/v1/messages/count_tokens` | Supported (except server tools) |
+
+With `claude-opus-5-5[1m]`, `CLAUDE_CODE_EFFORT_LEVEL=max` and
+`CLAUDE_CODE_AUTO_COMPACT_WINDOW=872000`, the captured requests carried
+`max_tokens: 128000`, adaptive thinking and `effort: max`; Claude Code reported
+a 1M model window and `/context` showed an 872k budget. WebSearch returned
+results and citations through the native-search bridge below.
+
 ## Historical Claude results
 
 The table below records earlier `/v1/messages` testing and existing shims.
@@ -59,27 +84,68 @@ Use "thinking.type.adaptive" and "output_config.effort" to control thinking beha
 
 Conduit rewrites the payload on the fly: `type` becomes `adaptive`, and the budget is translated into an `effort` level (`<=4000` → `low`, `4000–16000` → `medium`, `>=16000` → `high`) unless the caller already picked one explicitly.
 
-### `effort` clamping per model
+### `effort` validated against Copilot metadata
+
+When Copilot publishes a model's `reasoning_effort` list (for example
+`claude-opus-5.5`: `low … max`), the requested effort is kept if listed and
+otherwise clamped to the nearest listed level below it. Without metadata the
+legacy mapping applies: `max` → `high` (`xhigh` on `-xhigh` variants) and
+`xhigh` → `high`.
+
+### Per-model effort overrides
 
 - **`claude-opus-4.7`** — upstream whitelist is `["medium"]`. Anything else (low / high / max) gets clamped to `medium`.
+- **`claude-opus-4.8`, `claude-opus-5`** — forced to `max`.
 - **`claude-haiku-4.5`** — does not support `reasoning_effort` at all. Conduit strips the field.
 
-### `max` / `xhigh` → `high`
+`claude-opus-5.5` has no override: Claude Code's `/effort` or
+`CLAUDE_CODE_EFFORT_LEVEL` decides.
 
-Anthropic's SDK sometimes sends `effort: "max"` or `"xhigh"`. Copilot only accepts `low / medium / high`, so Conduit maps those to `high` before forwarding.
+### `thinking.type: "disabled"` on Opus 5.5
+
+Opus 5.5 rejects disabled thinking. Conduit drops `thinking` (the default is
+adaptive) and uses the model's lowest effort instead. Another model returning
+the same 400 is remembered and the request is retried once.
+
+### Per-turn effort
+
+Claude Code 2.1.280 can place `output_config` on a mid-conversation system
+message. Copilot rejects that shape, so Conduit removes it and lifts the most
+recent per-turn effort to the request-level `output_config`.
+
+### `context_management` and betas
+
+`anthropic-beta` is not forwarded in general. The exception is
+`context-management-*`, sent only with a `context_management` body, which
+Copilot then accepts. Without that beta — or after an upstream rejection, which
+is retried once — `context_management` is stripped.
 
 ### Unsupported top-level fields
 
 The following fields are silently stripped on their way out because Copilot's `/v1/messages` returns "Extra inputs" errors for them. Per-block `cache_control` is preserved — only the _top-level_ shortcut is dropped.
 
-- `context_management`
 - top-level `cache_control`
 - `container`
 - `inference_geo`
 
+`safeguards` is deliberately **not** stripped: removing it would make Claude
+Code believe a server-side safety classifier had run. Its upstream 400 lets
+Claude Code fall back to its local auto-mode classifier.
+
+### Web search for Claude models
+
+Copilot rejects Anthropic's `web_search_*` server tool on Claude models.
+Conduit runs the search with Copilot's native Responses `web_search` on a
+bridge model — `CONDUIT_WEB_SEARCH_MODEL`, or the first available of
+`gpt-6-sol`, `gpt-5.6-sol`, `gpt-6-luna`, `gpt-5.6-sol-fast` — and returns
+Anthropic `server_tool_use`, `web_search_tool_result` and text blocks under the
+requested model. `allowed_domains`, location and `max_uses` are forwarded;
+`blocked_domains` cannot be enforced natively and fails explicitly unless a
+Tavily fallback is configured. The request log records the search model.
+
 ### Model name normalization
 
-SDK-style model names (`claude-opus-4-6-20250820`) are mapped to Copilot IDs (`claude-opus-4.6`). When the client sends `anthropic-beta: context-1m-*`, Conduit picks the `-1m` variant (`claude-opus-4.6-1m`). In our tests `claude-opus-4.6` already accepts up to 1,000,000 input tokens without the `-1m` suffix, so the beta header isn't strictly required.
+SDK-style model names (`claude-opus-4-6-20250820`, `claude-opus-5-5[1m]`) are mapped to Copilot IDs (`claude-opus-4.6`, `claude-opus-5.5`). A Claude model missing from the startup model cache triggers a throttled refresh before the unavailable-model fallback is used. When the client sends `anthropic-beta: context-1m-*`, Conduit picks the `-1m` variant (`claude-opus-4.6-1m`). In our tests `claude-opus-4.6` already accepts up to 1,000,000 input tokens without the `-1m` suffix, so the beta header isn't strictly required.
 
 ## How to test yourself
 

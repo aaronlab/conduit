@@ -29,3 +29,27 @@ export function nativeModel(id = "gpt-5.3-codex", overrides: Partial<Model> = {}
     ...overrides,
   }
 }
+
+export function claudeModel(id = "claude-opus-5.5", overrides: Partial<Model> = {}): Model {
+  return nativeModel(id, {
+    name: "Claude Opus 5.5",
+    vendor: "Anthropic",
+    supported_endpoints: ["/v1/messages", "/chat/completions"],
+    capabilities: {
+      family: id,
+      object: "model_capabilities",
+      type: "chat",
+      tokenizer: "o200k_base",
+      limits: { max_prompt_tokens: 872_000, max_context_window_tokens: 1_000_000, max_output_tokens: 128_000 },
+      supports: {
+        tool_calls: true,
+        parallel_tool_calls: true,
+        streaming: true,
+        vision: true,
+        structured_outputs: true,
+        reasoning_effort: ["low", "medium", "high", "xhigh", "max"],
+      },
+    },
+    ...overrides,
+  })
+}

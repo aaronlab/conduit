@@ -120,6 +120,21 @@ export function Connect() {
           <div className="code-block">{`export ANTHROPIC_BASE_URL=${shellQuote(baseUrl)}
 export ANTHROPIC_AUTH_TOKEN='your-conduit-api-key'
 unset ANTHROPIC_API_KEY`}</div>
+          {info.models.includes("claude-opus-5.5") && (
+            <>
+              <p style={{ margin: "12px 0", color: "var(--text-secondary)", fontSize: 13 }}>
+                Claude Opus 5.5 at max effort with Copilot&apos;s 872k prompt limit as the auto-compact window
+                (requires Claude Code 2.1.280 or newer):
+              </p>
+              <div className="code-block">{`export ANTHROPIC_MODEL='claude-opus-5-5[1m]'
+export ANTHROPIC_DEFAULT_OPUS_MODEL='claude-opus-5-5[1m]'
+export ANTHROPIC_DEFAULT_SONNET_MODEL='claude-opus-5-5[1m]'
+export ANTHROPIC_DEFAULT_HAIKU_MODEL='claude-opus-5-5[1m]'
+export ANTHROPIC_DEFAULT_FABLE_MODEL='claude-opus-5-5[1m]'
+export CLAUDE_CODE_EFFORT_LEVEL=max
+export CLAUDE_CODE_AUTO_COMPACT_WINDOW=872000`}</div>
+            </>
+          )}
         </div>
       </div>
 

@@ -5,7 +5,14 @@ import type {
 import type { ResponsesPayload } from "../../services/copilot/create-responses"
 import { HTTPError, InvalidRequestError } from "../../lib/error"
 
-export const NATIVE_WEB_SEARCH_MODELS = new Set(["gpt-5.6-sol"])
+// Responses models whose hosted `web_search` produced a search call plus URL
+// citations through Copilot (Sol originally; the others verified 2026-09-23).
+export const NATIVE_WEB_SEARCH_MODELS = new Set(["gpt-5.6-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-sol-fast"])
+
+// Copilot's Claude Messages endpoint rejects Anthropic's server-side
+// `web_search_*` tool ("The use of the web search tool is not supported."), so
+// searches requested by other models run on the first available model here.
+export const WEB_SEARCH_BRIDGE_MODELS = ["gpt-6-sol", "gpt-5.6-sol", "gpt-6-luna", "gpt-5.6-sol-fast"] as const
 
 export interface WebSearchRequestPayload {
   messages?: Array<{
@@ -51,6 +58,23 @@ export interface NativeWebSearchResponse {
 
 export function supportsNativeWebSearch(model: string): boolean {
   return NATIVE_WEB_SEARCH_MODELS.has(model)
+}
+
+/**
+ * Pick the Copilot Responses model that executes an Anthropic web search.
+ * Native-search models search themselves; every other model (notably Claude)
+ * uses CONDUIT_WEB_SEARCH_MODEL or the first published bridge model.
+ */
+export function selectWebSearchModel(
+  resolvedModel: string,
+  availableModelIds: readonly string[] | null,
+  configuredModel?: string | null,
+): string | null {
+  if (supportsNativeWebSearch(resolvedModel)) return resolvedModel
+  const configured = configuredModel?.trim()
+  if (configured) return configured
+  if (availableModelIds === null) return WEB_SEARCH_BRIDGE_MODELS[0]
+  return WEB_SEARCH_BRIDGE_MODELS.find((candidate) => availableModelIds.includes(candidate)) ?? null
 }
 
 export function extractWebSearchQuery(payload: WebSearchRequestPayload): string {
@@ -105,6 +129,8 @@ export function buildNativeWebSearchResponse(
     requestedModel: string
     requestedQuery: string
     serverToolUseId: string
+    /** Report this model instead of the search backend (bridged searches). */
+    responseModel?: string
   },
 ): AnthropicResponse {
   const output = native.output ?? []
@@ -165,7 +191,7 @@ export function buildNativeWebSearchResponse(
     id: native.id || `msg_${options.requestId}`,
     type: "message",
     role: "assistant",
-    model: native.model || options.requestedModel,
+    model: options.responseModel ?? (native.model || options.requestedModel),
     content,
     stop_reason: "end_turn",
     stop_sequence: null,
