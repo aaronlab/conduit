@@ -132,7 +132,8 @@ export ANTHROPIC_DEFAULT_SONNET_MODEL='claude-opus-5-5[1m]'
 export ANTHROPIC_DEFAULT_HAIKU_MODEL='claude-opus-5-5[1m]'
 export ANTHROPIC_DEFAULT_FABLE_MODEL='claude-opus-5-5[1m]'
 export CLAUDE_CODE_EFFORT_LEVEL=max
-export CLAUDE_CODE_AUTO_COMPACT_WINDOW=872000`}</div>
+export CLAUDE_CODE_AUTO_COMPACT_WINDOW=872000
+export CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK=1`}</div>
             </>
           )}
         </div>

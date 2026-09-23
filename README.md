@@ -126,6 +126,9 @@ export ANTHROPIC_DEFAULT_HAIKU_MODEL='claude-opus-5-5[1m]'
 export ANTHROPIC_DEFAULT_FABLE_MODEL='claude-opus-5-5[1m]'
 export CLAUDE_CODE_EFFORT_LEVEL=max
 export CLAUDE_CODE_AUTO_COMPACT_WINDOW=872000
+# On a safeguard refusal, stay on Opus 5.5 instead of switching to
+# claude-opus-4-8, which Copilot lacks (Conduit would route it to Sol).
+export CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK=1
 claude
 ```
 
@@ -136,6 +139,9 @@ claude
   Opus 5.5 capabilities; Conduit sends Copilot's `claude-opus-5.5`.
 - **Effort:** `max` is session-only in `/effort`, so the environment variable
   pins it. Conduit forwards every effort level Copilot publishes for the model.
+- **Thinking:** Opus 5.5 returns thinking text only for `display: summarized`.
+  Add `"showThinkingSummaries": true` to `~/.claude/settings.json` to see the
+  summaries in the conversation; Ctrl+O shows them in full.
 - **Context:** without `[1m]`, Claude Code assumes 200k for a custom base URL.
   Copilot allows 872,000 prompt tokens (1M window minus 128k output), so the
   auto-compact window is set to exactly that. `/context` then reports `…/872k`.

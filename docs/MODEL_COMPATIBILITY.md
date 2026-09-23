@@ -37,7 +37,7 @@ Copilot probes. Copilot currently publishes one Claude model, `claude-opus-5.5`.
 | Endpoint | `/v1/messages` passthrough (Claude Code sends Anthropic's `claude-opus-5-5`) |
 | Window / prompt / output | 1,000,000 / **872,000** / 128,000 tokens |
 | `effort` | `low`, `medium`, `high`, `xhigh`, `max` — all forwarded as requested |
-| `thinking` | `adaptive` (with `display`); `disabled` is **rejected** upstream |
+| `thinking` | `adaptive`; `disabled` is **rejected** upstream. Thinking text is returned only for `display: summarized` (`omitted` or no `display` returns empty thinking blocks) |
 | Over-limit prompt | `400 prompt is too long: N tokens > 1000000 maximum` (Anthropic format) |
 | Client version | Claude Code **≥ 2.1.280**, else `claude_code_version_too_old` |
 | Anthropic `web_search_*` server tool | **Rejected** (`The use of the web search tool is not supported.`) |
@@ -47,6 +47,7 @@ Copilot probes. Copilot currently publishes one Claude model, `claude-opus-5.5`.
 | `/v1/messages/count_tokens` | Supported (except server tools) |
 | Images per request | Several accepted (3 screenshots in tool results passed), although metadata lists `max_prompt_images: 1` |
 | Claude Code's Claude in Chrome (`--chrome`) | Not available: Claude Code requires a claude.ai OAuth login and disables it with `ANTHROPIC_AUTH_TOKEN` or a custom base URL |
+| Safeguard refusal (`stop_reason: refusal`) | Claude Code retries on `claude-opus-4-8`, which Copilot lacks, so Conduit's fallback serves it with `gpt-5.6-sol` (seen in a real subagent). `CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK=1` keeps the session on Opus 5.5 |
 
 With `claude-opus-5-5[1m]`, `CLAUDE_CODE_EFFORT_LEVEL=max` and
 `CLAUDE_CODE_AUTO_COMPACT_WINDOW=872000`, the captured requests carried

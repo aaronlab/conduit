@@ -116,6 +116,9 @@ export ANTHROPIC_DEFAULT_HAIKU_MODEL='claude-opus-5-5[1m]'
 export ANTHROPIC_DEFAULT_FABLE_MODEL='claude-opus-5-5[1m]'
 export CLAUDE_CODE_EFFORT_LEVEL=max
 export CLAUDE_CODE_AUTO_COMPACT_WINDOW=872000
+# 安全规则拒答时留在 Opus 5.5，不切换到 claude-opus-4-8
+#（Copilot 没有这个型号，Conduit 会把它转给 Sol）。
+export CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK=1
 claude
 ```
 
@@ -126,6 +129,9 @@ claude
   的全部能力；Conduit 转发给 Copilot 时改写为 `claude-opus-5.5`。
 - **思考强度：** `/effort max` 只对当前会话生效，所以用环境变量固定 `max`；
   Conduit 会原样转发 Copilot 为该模型公布的所有档位。
+- **思考过程：** Opus 5.5 只有在 `display: summarized` 时才返回思考内容。在
+  `~/.claude/settings.json` 里加上 `"showThinkingSummaries": true` 即可在对话中
+  看到思考摘要，按 Ctrl+O 查看完整内容。
 - **上下文：** 自定义 base URL 且不带 `[1m]` 时，Claude Code 只按 200k 计算。
   Copilot 允许 872,000 个提示词 token（1M 窗口减去 128k 输出），因此自动压缩窗口
   设为正好 872k，`/context` 显示为 `…/872k`。

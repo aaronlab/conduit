@@ -20,6 +20,10 @@ All notable changes to Conduit are documented here. Format follows [Keep a Chang
   MCP (`--autoConnect` to the running Chrome), verified with navigation,
   screenshots and image understanding. Claude Code's own Claude in Chrome is
   unavailable through gateways by design.
+- Documented visible Opus 5.5 thinking (`showThinkingSummaries`, which requests
+  `display: summarized`) and `CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK=1`, which
+  keeps safeguard refusals on Opus 5.5 instead of Claude Code's
+  `claude-opus-4-8` retry that Conduit would serve with Sol.
 - Anthropic-format `/v1/models` (when `anthropic-version` is sent) with
   Anthropic Claude ids, for Claude Code gateway model discovery. Codex and
   OpenAI listings are unchanged.
