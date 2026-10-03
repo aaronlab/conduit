@@ -1,4 +1,5 @@
 export interface Config {
+  host: string;
   port: number;
   apiKey: string;
   internalKey: string;
@@ -10,6 +11,7 @@ export interface Config {
 
 export function loadConfig(): Config {
   return {
+    host: process.env.CONDUIT_HOST ?? "0.0.0.0",
     port: parseInt(process.env.CONDUIT_PORT ?? "7133", 10),
     apiKey: process.env.CONDUIT_API_KEY ?? "",
     internalKey: process.env.CONDUIT_INTERNAL_KEY ?? "",

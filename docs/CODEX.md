@@ -319,6 +319,18 @@ Official references:
 [authentication](https://learn.chatgpt.com/docs/auth#alternative-model-providers),
 [local Work/external-provider boundaries](https://learn.chatgpt.com/docs/amazon-bedrock).
 
+### Phone access to local conversations
+
+The open-source Paseo companion can run Codex through the same dedicated
+Conduit profile. Existing official desktop threads were verified with a
+**serial desktop-to-mobile-to-desktop handoff**, retaining their native UUID.
+It does not attach to the official GUI's live app-server. Finish and quit
+the official app before handing a thread over; finish and stop the mobile
+engine before reopening that thread in the official app.
+
+See [mobile setup and verified limits](./MOBILE.md) for phone downloads,
+`cxm` commands, encrypted relay pairing and permission handling.
+
 <a id="a-web-study-entry-is-not-automatically-a-local-plugin"></a>
 
 ### Study Mode and local guided learning

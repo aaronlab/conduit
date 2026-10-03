@@ -108,6 +108,15 @@ and select **Study (Conduit local)** from the Work composer's `@study` search.
 This is a separate explicit-only local workflow, **not** OpenAI's hosted
 Study Mode. See [Study setup and boundaries](./docs/CODEX.md#study-mode-and-local-guided-learning).
 
+### Phone companion
+
+[Paseo](https://github.com/getpaseo/paseo) provides open-source iOS/Android
+clients for Codex running on your Mac through Conduit. The managed `bin/cxm`
+setup keeps HTTP listeners on loopback and pairs through an encrypted relay.
+Existing official desktop threads support a verified **serial handoff**, not
+simultaneous attachment to the official GUI's engine. See
+[mobile installation, pairing and verification](./docs/MOBILE.md).
+
 ### Claude Code
 
 **Claude Opus 5.5 · Max effort · 872k context** (verified on 2026-09-23 with

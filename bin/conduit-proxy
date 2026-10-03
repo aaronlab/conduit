@@ -1,0 +1,15 @@
+#!/usr/bin/env bun
+import { join } from "node:path"
+import { fileURLToPath } from "node:url"
+import { resolveConduitApiKey } from "../packages/proxy/src/lib/codex-cli"
+
+const repoRoot = fileURLToPath(new URL("..", import.meta.url))
+try {
+  process.env.CONDUIT_API_KEY = await resolveConduitApiKey(repoRoot, process.env)
+  process.env.CONDUIT_HOST ??= "127.0.0.1"
+  process.env.CONDUIT_DB_PATH ??= join(repoRoot, "packages", "proxy", "data", "conduit.db")
+  await import("../packages/proxy/src/index.ts")
+} catch (error) {
+  console.error(`conduit-proxy: ${error instanceof Error ? error.message : String(error)}`)
+  process.exitCode = 1
+}

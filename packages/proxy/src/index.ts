@@ -73,6 +73,7 @@ async function main() {
   })
 
   const server = Bun.serve({
+    hostname: config.host,
     port: config.port,
     // Bun's default idleTimeout is 10s, which kills long-running Claude
     // streaming responses (opus-4.7 can think silently >10s before emitting
@@ -99,7 +100,7 @@ async function main() {
     },
   })
 
-  logger.info(`Conduit proxy listening on port ${server.port}`)
+  logger.info(`Conduit proxy listening on ${config.host}:${server.port}`)
 }
 
 main().catch((err) => {

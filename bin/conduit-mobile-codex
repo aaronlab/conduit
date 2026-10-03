@@ -1,0 +1,23 @@
+#!/usr/bin/env bun
+import { spawn } from "node:child_process"
+import { findBundledCodex } from "../packages/proxy/src/lib/codex-mobile"
+import { findOfficialGuiApp } from "../packages/proxy/src/lib/codex-gui"
+
+try {
+  const app = await findOfficialGuiApp(undefined, process.env.CONDUIT_GUI_APP_PATH)
+  const executable = await findBundledCodex(app)
+  const child = spawn(executable, process.argv.slice(2), { stdio: "inherit", env: process.env })
+  const terminate = () => child.kill("SIGTERM")
+  const interrupt = () => child.kill("SIGINT")
+  process.once("SIGTERM", terminate)
+  process.once("SIGINT", interrupt)
+  process.exitCode = await new Promise<number>((resolve, reject) => {
+    child.once("error", reject)
+    child.once("exit", code => resolve(code ?? 1))
+  })
+  process.off("SIGTERM", terminate)
+  process.off("SIGINT", interrupt)
+} catch (error) {
+  console.error(`conduit-mobile-codex: ${error instanceof Error ? error.message : String(error)}`)
+  process.exitCode = 1
+}

@@ -84,6 +84,11 @@ Any tool that lets you set `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` (or equ
 
 ## How do I run this in the background?
 
+For the managed macOS phone companion, `bin/cxm setup` and `bin/cxm start`
+install per-user proxy/mobile services with private credentials and loopback
+listeners. See [mobile setup](./MOBILE.md). Do not start a second proxy job on
+the same port.
+
 ### macOS (launchd)
 
 Create `~/Library/LaunchAgents/com.conduit.proxy.plist`:

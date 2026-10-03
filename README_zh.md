@@ -99,6 +99,14 @@ Astra 的目录与启动器默认请求 `detailed` 推理摘要；摘要开关�
 这是明确标注、需要主动选择的本地学习工作流，**不是 OpenAI 官方云端学习模式**。
 原版入口与本地版的区别见 [学习模式说明](./docs/CODEX.md#study-mode-and-local-guided-learning)。
 
+### 手机接续电脑会话
+
+支持开源的 [Paseo](https://github.com/getpaseo/paseo) iPhone/Android 客户端，
+任务仍在 Mac 上通过 Conduit 执行。`bin/cxm` 提供常驻服务、加密中继配对和会话导入；
+不会把 Conduit 或桌面调试端口公开到互联网。
+已有官方 Work/Codex 会话已验证可以**串行交接**，不是两个引擎同时操作同一会话。
+下载、配对、权限和验证范围见 [手机使用说明](./docs/MOBILE.md)。
+
 ### 使用 Claude Code
 
 **Claude Opus 5.5 · Max 思考 · 872k 上下文**（2026-09-23 用 Claude Code 2.1.280 实测）：

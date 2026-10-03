@@ -1,5 +1,10 @@
 # Remote access to your local Claude Code
 
+For an open-source iPhone/Android **Codex conversation client**, see the
+[Paseo mobile integration](./MOBILE.md). This page describes the separate
+legacy browser-terminal route; it is not synchronization with the official
+ChatGPT desktop GUI.
+
 `bin/conduit-remote` exposes a persistent tmux session — perfect for running
 Claude Code — through a browser-based terminal. Open it on your phone,
 iPad, or another laptop and you're driving the same Claude Code session
