@@ -10,6 +10,7 @@ import { isRecord } from "./validation"
 const execute = promisify(execFile)
 export const PASEO_VERSION = "0.10.3"
 export const MOBILE_PORT = 6799
+export const OFFICIAL_RELAY_ORIGIN = "https://paseo-relay-next.fly.dev"
 const PROXY_LABEL = "lab.aaronlab.conduit.proxy"
 const MOBILE_LABEL = "lab.aaronlab.conduit.mobile"
 
@@ -185,7 +186,44 @@ async function installService(options: MobileOptions, kind: "proxy" | "mobile"):
   return path
 }
 
-export const MOBILE_HELP = `Usage: cxm [setup|start|stop|status|pair|open|import THREAD_UUID]
+export async function repairMobileRelay(
+  home: string,
+  run: (args: string[]) => Promise<string>,
+  fetchImpl: (url: string, init: RequestInit) => Promise<Response> = fetch,
+): Promise<void> {
+  const agents: unknown = JSON.parse(await run(["ls"]))
+  if (!Array.isArray(agents) || !agents.every(agent => isRecord(agent) && typeof agent.status === "string")) {
+    throw new Error("Could not establish whether mobile tasks are idle; the relay was not changed.")
+  }
+  if (agents.some(agent => !["idle", "closed", "stopped", "completed", "error", "failed"].includes(agent.status))) {
+    throw new Error("Finish active mobile tasks before repairing the relay. No settings were changed.")
+  }
+  const response = await fetchImpl(`${OFFICIAL_RELAY_ORIGIN}/ready`, {
+    redirect: "error", signal: AbortSignal.timeout(15000),
+  })
+  if (!response.ok) throw new Error(`The official alternate relay is not ready (HTTP ${response.status}); no settings were changed.`)
+  const readiness: unknown = await response.json()
+  if (!isRecord(readiness) || readiness.status !== "ready") {
+    throw new Error("The official alternate relay did not confirm readiness; no settings were changed.")
+  }
+  const configPath = join(home, "config.json")
+  if (!(await lstat(configPath)).isFile()) throw new Error("The mobile config must be a regular file.")
+  const original = await readFile(configPath, "utf8")
+  const config: unknown = JSON.parse(original)
+  if (!isRecord(config) || !isRecord(config.daemon)) throw new Error("Invalid mobile daemon configuration.")
+  const relay = {
+    enabled: true,
+    endpoint: "paseo-relay-next.fly.dev:443",
+    publicEndpoint: "paseo-relay-next.fly.dev:443",
+    useTls: true,
+    publicUseTls: true,
+  }
+  await writeExclusive(join(home, `config.before-relay-repair-${Date.now()}.json`), original)
+  await run(["daemon", "config", "set", "daemon.relay", JSON.stringify(relay)])
+  await run(["daemon", "restart"])
+}
+
+export const MOBILE_HELP = `Usage: cxm [setup|start|stop|status|pair|repair-relay|open|import THREAD_UUID]
 
 Paseo ${PASEO_VERSION}: an open-source phone companion for local Codex through Conduit.
 setup  Configure private mobile state and per-user startup services.
@@ -193,6 +231,8 @@ start  Start the proxy if needed and the mobile daemon.
 stop   Stop the mobile daemon only; keep Conduit running.
 status Show the real daemon state.
 pair   Display the official pairing QR and URL; keep them private.
+repair-relay  Check idle tasks, select the documented official relay origin,
+              reconnect, and print a new verified pairing QR (for relay 503s).
 open   Open the password-protected local Paseo web interface.
 import Import an idle Astra desktop thread, explicitly selecting Max and
        default permissions. Quit the official GUI first.
@@ -212,7 +252,7 @@ export async function runConduitMobile(argv: readonly string[], repoRoot: string
   if (argv.length === 1 && ["--help", "-h"].includes(argv[0]!)) { console.log(MOBILE_HELP); return 0 }
   try {
     const action = argv[0] ?? "status"
-    if (!["setup", "start", "stop", "status", "pair", "open", "import"].includes(action)
+    if (!["setup", "start", "stop", "status", "pair", "repair-relay", "open", "import"].includes(action)
       || (action === "import" ? argv.length !== 2 || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(argv[1]!) : argv.length > 1)) {
       throw new Error("Use cxm --help for supported commands and a full native thread UUID.")
     }
@@ -307,15 +347,29 @@ export async function runConduitMobile(argv: readonly string[], repoRoot: string
       await execute(paseo, ["agent", "update", result.agentId, "--thinking", "max", "--home", options.home, "--json"], { env, timeout: 30000 })
       await execute(paseo, ["agent", "mode", result.agentId, "auto", "--home", options.home, "--json"], { env, timeout: 30000 })
       console.log(`Imported native thread ${argv[1]} as Paseo agent ${result.agentId}; Max and default permissions explicitly selected.`)
-    } else if (action === "pair") {
+    } else if (action === "pair" || action === "repair-relay") {
+      if (action === "repair-relay") {
+        await repairMobileRelay(options.home, async args =>
+          (await execute(paseo, [...args, "--home", options.home, "--json"], { env, timeout: 90000 })).stdout,
+        )
+      }
       const result = await execute(paseo, ["daemon", "pair", "--relay", "--home", options.home, "--json"], { env, timeout: 30000, maxBuffer: 1024 * 1024 })
       const pairing: unknown = JSON.parse(result.stdout)
       if (!isRecord(pairing) || typeof pairing.qr !== "string" || typeof pairing.url !== "string") throw new Error("Unexpected Paseo pairing output.")
+      try {
+        await execute(paseo, ["ls", "--json"], {
+          env: { ...process.env, PASEO_HOST: pairing.url, PASEO_HOME: undefined, PASEO_PASSWORD: undefined },
+          timeout: 30000,
+        })
+      } catch (error) {
+        await writeFile(join(options.home, "logs", "pairing-probe-error.log"), String(error), { mode: 0o600 })
+        throw new Error("The encrypted relay connection failed. No QR was printed; details are in the private pairing-probe-error.log.")
+      }
       await writeFile(join(options.home, "pairing.json"), result.stdout, { mode: 0o600 })
       await chmod(join(options.home, "pairing.json"), 0o600)
       console.log(pairing.qr)
       console.log(pairing.url)
-      console.log("Scan in the Paseo phone app. Treat this pairing code/link as a password.")
+      console.log("Mac-to-relay connection verified. Scan this QR in the Paseo phone app; the phone's network still needs to connect successfully. Keep the code/link private.")
     } else {
       const result = await execute(paseo, ["daemon", "status", "--home", options.home, "--json"], { env, timeout: 30000 })
       console.log(result.stdout.trim())

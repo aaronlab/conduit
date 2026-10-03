@@ -64,6 +64,9 @@ use its pairing-link option. Pairing uses an outbound relay connection; no
 router port forwarding, public Conduit port or public desktop debugging port
 is needed. **Treat the QR and pairing URL as credentials.**
 
+`cxm pair` now verifies an actual encrypted relay connection before printing
+the QR. This verifies the Mac's route, not the phone's network route.
+
 Optionally link `bin/cxm` into a directory on your PATH. On the configured
 machine the short command is `cxm`.
 
@@ -132,6 +135,7 @@ the convenience importer does not silently apply Astra's Max preset to them.
 | `cxm start` | Start managed services; leave an already-running external proxy alone |
 | `cxm status` | Report the actual daemon/worker/provider state |
 | `cxm pair` | Display the private pairing QR/link |
+| `cxm repair-relay` | Safely reconnect through the documented official relay origin and generate a new verified QR |
 | `cxm open` | Open the local password-protected Paseo interface |
 | `cxm import UUID` | Import a saved Astra thread with explicit Max/default permissions |
 | `cxm stop` | Stop the mobile service only; keep Conduit running |
@@ -160,6 +164,40 @@ The Codex launcher discovers both the older `Resources/codex` layout and the
 newer `Resources/codex-cli/bin/codex` layout of the signed official app.
 It does not replace a missing bundled executable with an unrelated PATH
 binary.
+
+## Native phone app shows 503 after scanning
+
+This is a connection failure, not evidence of an invalid Copilot model or
+API key. A healthy local daemon does not prove that the phone can reach its
+relay. Do not disable TLS, remove authentication, or expose the daemon on all
+interfaces to work around it.
+
+With mobile tasks idle, run:
+
+```bash
+cxm repair-relay
+```
+
+This checks the official alternate origin's readiness, saves a private
+configuration backup, changes **only** relay settings, reconnects, verifies
+an encrypted connection, and prints a new QR. It uses
+`paseo-relay-next.fly.dev:443`, the HTTPS upstream explicitly listed in
+[Paseo 0.10.3's official relay configuration](https://github.com/getpaseo/paseo/blob/v0.10.3/packages/relay/wrangler.toml).
+TLS and application-layer E2EE stay enabled; chat records, model settings,
+passwords and daemon identity are not reset.
+
+Scan the **new** QR in Paseo. If the phone retained the failed old host
+connection, remove that phone-side connection and add it again; this does not
+delete the Mac's native conversations. Later `cxm pair` commands preserve the
+selected relay route.
+
+This route was verified from the Mac after a phone-reported 503. It bypasses
+the original relay hostname's forwarding path, but does not establish the
+cause of a phone-specific DNS, proxy, regional-routing or network failure.
+The phone still needs a successful connection before its 503 can be declared
+resolved. If the repair command itself fails, it does not print a success QR;
+encrypted-probe errors are saved in the private
+`~/.paseo-conduit/logs/pairing-probe-error.log`.
 
 ## Trust boundaries
 
@@ -204,7 +242,7 @@ binary.
   uncredentialed Paseo client was rejected with `AUTH_REQUIRED` at the
   WebSocket application handshake; an HTTP upgrade alone does not establish
   authenticated control.
-- Eighteen focused listener/mobile/GUI tests and strict TypeScript checking
+- Twenty-two focused listener/mobile/GUI tests and strict TypeScript checking
   passed. No physical iPhone or Android hardware test was substituted with
   these checks.
 
