@@ -13,6 +13,11 @@ export const MOBILE_PORT = 6799
 export const OFFICIAL_RELAY_ORIGIN = "https://paseo-relay-next.fly.dev"
 const PROXY_LABEL = "lab.aaronlab.conduit.proxy"
 const MOBILE_LABEL = "lab.aaronlab.conduit.mobile"
+const PRIVATE_LABEL = "lab.aaronlab.conduit.private"
+
+export function privateAuthorizationUrl(log: string): string | null {
+  return [...log.matchAll(/https:\/\/login\.tailscale\.com\/a\/[a-zA-Z0-9_-]+/g)].at(-1)?.[0] ?? null
+}
 
 export interface MobileOptions {
   repoRoot: string
@@ -143,19 +148,24 @@ function xml(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;")
 }
 
-export function mobileServicePlist(options: MobileOptions, kind: "proxy" | "mobile"): string {
-  const label = kind === "proxy" ? PROXY_LABEL : MOBILE_LABEL
+export function mobileServicePlist(options: MobileOptions, kind: "proxy" | "mobile" | "private"): string {
+  const label = kind === "proxy" ? PROXY_LABEL : kind === "mobile" ? MOBILE_LABEL : PRIVATE_LABEL
   const args = kind === "proxy"
     ? [options.bunPath, join(options.repoRoot, "bin/conduit-proxy")]
-    : [join(options.paseoApp, "Contents/Resources/bin/paseo"), "daemon", "run", "--home", options.home]
+    : kind === "mobile"
+      ? [join(options.paseoApp, "Contents/Resources/bin/paseo"), "daemon", "run", "--home", options.home]
+      : [join(options.home, "bin/tsnet-proxy"), "-dir", join(options.home, "tailnet"), "conduit-mobile", String(MOBILE_PORT), String(MOBILE_PORT)]
   const path = [join(options.userHome, ".local/bin"), join(options.userHome, ".bun/bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin"].join(":")
+  const privateEnv = kind === "private"
+    ? "<key>TS_AUTHKEY</key><string></string><key>TS_NO_LOGS_NO_SUPPORT</key><string>true</string>"
+    : ""
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>Label</key><string>${label}</string>
 <key>ProgramArguments</key><array>${args.map(arg => `<string>${xml(arg)}</string>`).join("")}</array>
 <key>WorkingDirectory</key><string>${xml(options.repoRoot)}</string>
-<key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(path)}</string><key>CONDUIT_HOST</key><string>127.0.0.1</string></dict>
+<key>EnvironmentVariables</key><dict><key>PATH</key><string>${xml(path)}</string><key>CONDUIT_HOST</key><string>127.0.0.1</string>${privateEnv}</dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>10</integer>
 <key>StandardOutPath</key><string>${xml(join(options.home, "logs", `${kind}.log`))}</string>
 <key>StandardErrorPath</key><string>${xml(join(options.home, "logs", `${kind}.log`))}</string>
@@ -170,8 +180,8 @@ async function serviceLoaded(label: string): Promise<boolean> {
   }
 }
 
-async function installService(options: MobileOptions, kind: "proxy" | "mobile"): Promise<string> {
-  const label = kind === "proxy" ? PROXY_LABEL : MOBILE_LABEL
+async function installService(options: MobileOptions, kind: "proxy" | "mobile" | "private"): Promise<string> {
+  const label = kind === "proxy" ? PROXY_LABEL : kind === "mobile" ? MOBILE_LABEL : PRIVATE_LABEL
   const directory = join(options.userHome, "Library/LaunchAgents")
   await mkdir(directory, { recursive: true })
   const path = join(directory, `${label}.plist`)
@@ -223,7 +233,7 @@ export async function repairMobileRelay(
   await run(["daemon", "restart"])
 }
 
-export const MOBILE_HELP = `Usage: cxm [setup|start|stop|status|pair|repair-relay|open|import THREAD_UUID]
+export const MOBILE_HELP = `Usage: cxm [setup|start|stop|status|pair|repair-relay|private|private-login|private-stop|open|import THREAD_UUID]
 
 Paseo ${PASEO_VERSION}: an open-source phone companion for local Codex through Conduit.
 setup  Configure private mobile state and per-user startup services.
@@ -233,6 +243,10 @@ status Show the real daemon state.
 pair   Display the official pairing QR and URL; keep them private.
 repair-relay  Check idle tasks, select the documented official relay origin,
               reconnect, and print a new verified pairing QR (for relay 503s).
+private       Start Tailscale's official single-port tsnet proxy. Requires
+              tsnet-proxy in the mobile home's bin, then normal user login.
+private-login Reopen the latest official private-network authorization page.
+private-stop  Stop that private-network proxy without changing other VPNs.
 open   Open the password-protected local Paseo web interface.
 import Import an idle Astra desktop thread, explicitly selecting Max and
        default permissions. Quit the official GUI first.
@@ -252,7 +266,7 @@ export async function runConduitMobile(argv: readonly string[], repoRoot: string
   if (argv.length === 1 && ["--help", "-h"].includes(argv[0]!)) { console.log(MOBILE_HELP); return 0 }
   try {
     const action = argv[0] ?? "status"
-    if (!["setup", "start", "stop", "status", "pair", "repair-relay", "open", "import"].includes(action)
+    if (!["setup", "start", "stop", "status", "pair", "repair-relay", "private", "private-login", "private-stop", "open", "import"].includes(action)
       || (action === "import" ? argv.length !== 2 || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(argv[1]!) : argv.length > 1)) {
       throw new Error("Use cxm --help for supported commands and a full native thread UUID.")
     }
@@ -271,7 +285,7 @@ export async function runConduitMobile(argv: readonly string[], repoRoot: string
       const signature = await execute("codesign", ["-dv", "--verbose=2", options.paseoApp])
       if (!signature.stderr.includes("TeamIdentifier=99ZMJMKU9Y")) throw new Error("Unexpected Paseo signing publisher.")
     }
-    if (!["stop", "status"].includes(action)) {
+    if (!["stop", "status", "private-login", "private-stop"].includes(action)) {
       const { stdout: version } = await execute(paseo, ["--version"], { timeout: 10000 })
       if (version.trim() !== PASEO_VERSION) throw new Error(`This integration was tested with Paseo ${PASEO_VERSION}, not ${version.trim()}. Review compatibility before upgrading.`)
     }
@@ -294,6 +308,57 @@ export async function runConduitMobile(argv: readonly string[], repoRoot: string
       throw new Error("The selected mobile home does not belong to this Conduit configuration.")
     }
     const domain = `gui/${process.getuid()}`
+    if (action === "private-login") {
+      const url = privateAuthorizationUrl(await readFile(join(options.home, "logs/private.log"), "utf8"))
+      if (!url) throw new Error("No private-network authorization link is available. Start it with cxm private first.")
+      await execute("open", [url])
+      console.log("Opened the latest official authorization page. Complete or review it yourself; no login was performed on your behalf.")
+      return 0
+    }
+    if (action === "private-stop") {
+      if (await serviceLoaded(PRIVATE_LABEL)) await execute("launchctl", ["bootout", `${domain}/${PRIVATE_LABEL}`])
+      console.log("The dedicated private-network proxy is stopped. Other network services were not changed.")
+      return 0
+    }
+    if (action === "private") {
+      const binary = join(options.home, "bin/tsnet-proxy")
+      if (!(await lstat(binary)).isFile()) throw new Error("Install the official tailscale.com/cmd/tsnet-proxy@v1.102.5 into the mobile home's bin first.")
+      const tailnet = join(options.home, "tailnet")
+      await mkdir(tailnet, { recursive: true, mode: 0o700 })
+      if (!(await lstat(tailnet)).isDirectory()) throw new Error("The dedicated tailnet state directory must not be a symlink.")
+      await chmod(tailnet, 0o700)
+      const logPath = join(options.home, "logs/private.log")
+      let offset = 0
+      try {
+        if (!(await lstat(logPath)).isFile()) throw new Error("The private-network log must be a regular file.")
+        offset = (await readFile(logPath, "utf8")).length
+      } catch (error) {
+        if (!isRecord(error) || error.code !== "ENOENT") throw error
+        await writeExclusive(logPath, "")
+      }
+      await chmod(logPath, 0o600)
+      if (!await serviceLoaded(PRIVATE_LABEL)) {
+        await execute("launchctl", ["bootstrap", domain, await installService(options, "private")])
+        for (let attempt = 0; attempt < 40; attempt++) {
+          const recentLog = (await readFile(logPath, "utf8")).slice(offset)
+          const authUrl = privateAuthorizationUrl(recentLog)
+          if (authUrl) {
+            await execute("open", [authUrl])
+            console.log("Opened the official Tailscale authorization page. Sign in yourself; this proxy is not connected until authorization succeeds.")
+            break
+          }
+          await new Promise(resolveWait => setTimeout(resolveWait, 250))
+        }
+      }
+      const service = await execute("launchctl", ["list", PRIVATE_LABEL])
+      if (!/"PID"\s*=\s*\d+/.test(service.stdout)) {
+        throw new Error(`The private proxy did not remain running. Inspect the private log: ${logPath}`)
+      }
+      console.log(`Single-port private proxy process configured: conduit-mobile, port ${MOBILE_PORT}. It exposes only Paseo, not a system VPN or a public Funnel.`)
+      console.log(`After authorizing it, connect Tailscale on the phone with the same account. In Paseo use Direct connection to its Tailscale IP, port ${MOBILE_PORT}, Use SSL off (WireGuard encrypts the transport).`)
+      console.log(`The separate Paseo password remains in ${join(options.home, "connection-password")}. Check authorization in Tailscale; a running proxy process alone does not prove phone connectivity.`)
+      return 0
+    }
     if (action === "start") {
       await prepareMobileHome(options)
       for (const [kind, label] of [["proxy", PROXY_LABEL], ["mobile", MOBILE_LABEL]] as const) {

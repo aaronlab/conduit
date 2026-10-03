@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { promisify } from "node:util"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { buildMobileConfig, findBundledCodex, mobileServicePlist, repairMobileRelay, MOBILE_HELP, MOBILE_PORT, OFFICIAL_RELAY_ORIGIN } from "../src/lib/codex-mobile"
+import { buildMobileConfig, findBundledCodex, mobileServicePlist, privateAuthorizationUrl, repairMobileRelay, MOBILE_HELP, MOBILE_PORT, OFFICIAL_RELAY_ORIGIN } from "../src/lib/codex-mobile"
 import type { MobileOptions } from "../src/lib/codex-mobile"
 
 const execute = promisify(execFile)
@@ -62,6 +62,22 @@ describe("mobile provider and startup configuration", () => {
     expect(MOBILE_HELP).toContain("do not share a live engine")
     expect(MOBILE_HELP).toContain("stop Paseo before reopening")
     expect(MOBILE_HELP).toContain("Relay is enabled")
+  })
+
+  it("limits the private network to the existing Paseo port without a system VPN or inherited auth key", () => {
+    const plist = mobileServicePlist(options(), "private")
+    expect(plist).toContain("bin/tsnet-proxy")
+    expect(plist).toContain("<string>conduit-mobile</string><string>6799</string><string>6799</string>")
+    expect(plist).toContain("<key>TS_AUTHKEY</key><string></string>")
+    expect(plist).toContain("<key>TS_NO_LOGS_NO_SUPPORT</key><string>true</string>")
+    expect(plist).not.toMatch(/tailscaled|userspace-networking|funnel|socks5|7133|CONDUIT_API_KEY|PASEO_PASSWORD/)
+  })
+
+  it("opens only the latest official HTTPS authorization link, not an arbitrary log URL", () => {
+    expect(privateAuthorizationUrl("https://login.tailscale.com/a/old\nhttps://login.tailscale.com/a/new-token"))
+      .toBe("https://login.tailscale.com/a/new-token")
+    expect(privateAuthorizationUrl("https://example.test/a/token")).toBeNull()
+    expect(privateAuthorizationUrl("http://login.tailscale.com/a/token")).toBeNull()
   })
 })
 

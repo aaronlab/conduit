@@ -136,6 +136,9 @@ the convenience importer does not silently apply Astra's Max preset to them.
 | `cxm status` | Report the actual daemon/worker/provider state |
 | `cxm pair` | Display the private pairing QR/link |
 | `cxm repair-relay` | Safely reconnect through the documented official relay origin and generate a new verified QR |
+| `cxm private` | Start the optional, single-port Tailscale bridge and open first-time authorization |
+| `cxm private-login` | Reopen its official authorization page, without logging in for you |
+| `cxm private-stop` | Stop only that private-network bridge |
 | `cxm open` | Open the local password-protected Paseo interface |
 | `cxm import UUID` | Import a saved Astra thread with explicit Max/default permissions |
 | `cxm stop` | Stop the mobile service only; keep Conduit running |
@@ -199,6 +202,67 @@ resolved. If the repair command itself fails, it does not print a success QR;
 encrypted-probe errors are saved in the private
 `~/.paseo-conduit/logs/pairing-probe-error.log`.
 
+## Independent private connection when the shared relay still fails
+
+The original relay name and its Fly origin use the same public infrastructure.
+If both still return 503 on the phone, do not treat another Mac-only probe as
+proof of a fix. The independent alternative is a Tailscale private connection,
+which [Paseo officially supports](https://github.com/getpaseo/paseo/blob/v0.10.3/public-docs/connectivity.md#tailscale).
+
+This integration uses Tailscale's official
+[`tsnet-proxy`](https://github.com/tailscale/tailscale/blob/v1.102.5/cmd/tsnet-proxy/tsnet-proxy.go),
+not a system VPN service or a custom encryption implementation. It exposes
+**only the existing Paseo port 6799** through an embedded userspace network.
+It does not add a system TUN interface, accept system DNS/routes, expose a
+SOCKS proxy, enable Tailscale SSH, or publish a Funnel. Unknown service ports
+are not forwarded to other localhost services.
+
+Install the pinned official proxy if it has not already been built:
+
+```bash
+mkdir -p ~/.paseo-conduit/bin
+GOBIN="$HOME/.paseo-conduit/bin" go install tailscale.com/cmd/tsnet-proxy@v1.102.5
+cxm private
+```
+
+Go is a build-time requirement, not needed to run the installed binary. Go's
+module checksum verification must remain enabled when using a module mirror.
+On the configured machine, the binary has already been built and the
+single-port process started.
+
+1. Complete the official Tailscale authorization page opened on the Mac using
+   your own account. `cxm private-login` reopens the latest link. Do not send
+   login credentials or auth keys to anyone.
+2. Install [Tailscale on iPhone](https://apps.apple.com/us/app/tailscale/id1470499037)
+   and sign in to the same personal tailnet. On 2026-10-03, the US listing was
+   available but the China-store lookup returned no app. Do not assume this
+   prerequisite is satisfied for a China-only App Store account.
+3. In the phone's Tailscale device list, find **conduit-mobile** and copy its
+   actual `100.x.x.x` private address. There is no usable private address until
+   account authorization succeeds.
+4. In Paseo choose **Direct connection**, not the public-relay QR flow. Enter
+   that private IP, port **6799**, and leave **Use SSL** off: the raw TCP
+   connection is carried inside encrypted WireGuard transport. Do not use this
+   setting for an ordinary unencrypted public/LAN connection.
+5. Supply the existing, separate Paseo password from
+   `~/.paseo-conduit/connection-password`. The Conduit API key is not needed.
+
+The bridge has its own per-user job, `lab.aaronlab.conduit.private`, and
+private state under `~/.paseo-conduit/tailnet`. Log uploads are disabled and
+ambient `TS_AUTHKEY` automation credentials are not inherited. A temporary
+general userspace `tailscaled` probe was stopped; it is not the deployed
+single-port bridge.
+
+Tailscale may establish a peer-to-peer path or use its own encrypted DERP
+transport. This bypasses Paseo's public relay, not every possible relay in
+the network. Phone VPN apps can conflict; their activation and account
+authorization remain explicit user actions.
+
+**Verification boundary:** the official binary build, isolated process,
+single-port arguments and authorization-link generation were checked.
+Account authorization and a successful phone connection are still required;
+a running process or printed login URL is not a completed phone test.
+
 ## Trust boundaries
 
 - Both managed HTTP listeners stay on `127.0.0.1`; Paseo's API/WebSocket
@@ -242,7 +306,7 @@ encrypted-probe errors are saved in the private
   uncredentialed Paseo client was rejected with `AUTH_REQUIRED` at the
   WebSocket application handshake; an HTTP upgrade alone does not establish
   authenticated control.
-- Twenty-two focused listener/mobile/GUI tests and strict TypeScript checking
+- Twenty-four focused listener/mobile/GUI tests and strict TypeScript checking
   passed. No physical iPhone or Android hardware test was substituted with
   these checks.
 
