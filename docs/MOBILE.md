@@ -81,6 +81,11 @@ On its welcome screen, choose **Direct connection**, enter `127.0.0.1:6799`,
 and supply that password. The phone normally uses the encrypted pairing route
 instead; do not enter the Mac's loopback address on the phone.
 
+Use `cxm open` for this managed desktop connection. Opening the stock Paseo
+app icon can select its ordinary `~/.paseo` profile instead; if using that
+client, connect it to the existing managed host rather than starting an
+unconfigured second daemon.
+
 ### Existing official ChatGPT Work/Codex conversations
 
 **Supported and tested as a serial handoff, not simultaneous attachment to
