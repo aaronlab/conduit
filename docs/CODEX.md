@@ -667,6 +667,10 @@ against actual saved Codex token-count events in the temporary home.
 - **Streaming:** fragmented UTF-8 and CR/LF/CRLF framing are handled. Completed
   output items are preserved/recovered before terminal completion. EOF or
   `[DONE]` alone is not a successful Responses completion.
+  Copilot's differently encoded IDs for one `output_index` are normalized
+  to the first upstream-issued ID throughout that response, including deltas
+  and its final output array. This prevents duplicate GUI messages without
+  suppressing repeated text or rewriting opaque reasoning/tool history.
 - **Errors:** upstream status/code/parameter and retry hints are preserved.
   Failed/incomplete streams are recorded as failures rather than successful
   requests. Disconnecting the client cancels the upstream request.
@@ -685,6 +689,27 @@ against actual saved Codex token-count events in the temporary home.
 - **Privacy:** normal logging records request metadata/usage/errors, not
   automatic conversation or screenshot dumps. Generated catalogs and keys
   are local files and should not be committed.
+
+### Unexpected skill use or duplicate greeting replies
+
+The ordinary app icon can open `~/.codex`, while `cxg` uses the separate
+Conduit GUI profile. Check the profile actually used by the app before
+changing its skills or model settings. Conduit does not install
+`using-superpowers`; a pre-existing user skill with that name can instruct
+the model to read skills even before answering a greeting. Disable it through
+the client's skill controls, or move only that skill outside all skill search
+directories, then start a new conversation. Already-loaded instructions may
+remain in an existing thread.
+
+Two API calls around a skill read are a normal tool loop, but two copies of
+each visible message are not. On 2026-10-11, the reported greeting contained
+one commentary item, one skill call and one final message; rotating streaming
+item IDs caused the UI to display both messages twice. Stable-ID normalization
+and removal of the unwanted skill were verified with a fresh plain greeting:
+**one actual Responses request, zero tool calls, one visible/stored answer**.
+Real opaque-reasoning and tool-result replay also passed with
+`gpt-5.5-xhigh` and Astra/max. The GUI retest used official desktop
+26.1007.30912 and bundled Codex 0.162.0-alpha.17.2.
 
 ## Codex CLI versus the graphical Chat / Work interface
 

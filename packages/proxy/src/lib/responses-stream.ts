@@ -31,11 +31,39 @@ export async function* normalizeResponsesStream(
   source: AsyncIterable<ServerSentEvent>,
 ): AsyncGenerator<ServerSentEvent> {
   const completedItems = new Set<number>()
+  const itemIds = new Map<number, string>()
   let sequence = 0
+
+  function stableItemId(index: number, id: string): string {
+    // Copilot can re-encode an opaque ID per event; Codex identifies UI items by ID.
+    const existing = itemIds.get(index)
+    if (existing !== undefined) return existing
+    itemIds.set(index, id)
+    return id
+  }
+
   for await (const event of source) {
     if (!event.data) continue
     if (event.data === "[DONE]") break
     const data = decodeResponsesEvent(event)
+    if (typeof data.output_index === "number" && Number.isSafeInteger(data.output_index) && data.output_index >= 0) {
+      if (isRecord(data.item) && typeof data.item.id === "string") {
+        data.item = { ...data.item, id: stableItemId(data.output_index, data.item.id) }
+      }
+      if (typeof data.item_id === "string") {
+        data.item_id = stableItemId(data.output_index, data.item_id)
+      }
+    }
+    if (isRecord(data.response) && Array.isArray(data.response.output)) {
+      data.response = {
+        ...data.response,
+        output: data.response.output.map((item, index) =>
+          isRecord(item) && typeof item.id === "string"
+            ? { ...item, id: stableItemId(index, item.id) }
+            : item,
+        ),
+      }
+    }
     if (data.type === "response.completed" && (!isRecord(data.response) || typeof data.response.id !== "string")) {
       throw new HTTPError("The completed Responses event is missing its response ID.", 502)
     }

@@ -83,6 +83,23 @@ describe("Responses HTTP route", () => {
       .toMatchObject({ status: "success", inputTokens: 4, outputTokens: 2 })
   })
 
+  it("keeps streaming and completed item identities consistent without repeating inference", async () => {
+    const item = { type: "message", role: "assistant", content: [{ type: "output_text", text: "Hello" }] }
+    vi.mocked(createResponses).mockResolvedValue(stream(
+      { type: "response.output_item.added", output_index: 0, item: { ...item, id: "start-id", content: [] } },
+      { type: "response.output_text.delta", output_index: 0, item_id: "delta-id", delta: "Hello" },
+      { type: "response.output_item.done", output_index: 0, item: { ...item, id: "done-id" } },
+      { ...completion, response: { ...completion.response, output: [{ ...item, id: "final-id" }] } },
+    ))
+    const response = await post({ model: "native", input: "hi", stream: true })
+    const text = await response.text()
+    expect(createResponses).toHaveBeenCalledTimes(1)
+    expect(text).not.toMatch(/delta-id|done-id|final-id/)
+    expect(text).toContain('"item_id":"start-id"')
+    expect((text.match(/"id":"start-id"/g) ?? [])).toHaveLength(3)
+    expect((text.match(/"delta":"Hello"/g) ?? [])).toHaveLength(1)
+  })
+
   it("preserves Astra's requested summary mode and forwards readable summary deltas", async () => {
     vi.mocked(createResponses).mockResolvedValue(stream(
       { type: "response.reasoning_summary_text.delta", delta: "Checking constraints." }, completion,

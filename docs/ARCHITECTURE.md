@@ -25,6 +25,12 @@ Session/turn headers are allowlisted; the local client's credentials are
 never forwarded as the Copilot credential. Upstream error status, structured
 error codes and retry hints survive the return path.
 
+Copilot can re-encode the same opaque output-item ID for successive SSE
+events. Within each response, Conduit retains the first upstream-issued ID
+per `output_index` for item starts, deltas, completions and final snapshots.
+This preserves the item identity expected by Codex's streaming UI without
+deduplicating text, changing `call_id`, or modifying encrypted reasoning.
+
 `GET /v1/models` retains OpenAI's `{object, data}` shape. Requests with a
 `client_version` query receive the separate Codex `{models}` catalog, whose
 capabilities and limits derive from current Copilot metadata. Only eligible

@@ -13,6 +13,19 @@ Codex 0.155.1 was verified on 2026-09-20. Use `bin/conduit-codex` and the
 capability-aware Responses catalog, not `wire_api = "chat"`. See
 [the Codex guide](./CODEX.md) for setup and opt-in smoke tests.
 
+## Why does a greeting invoke a skill or show the same reply twice?
+
+A user-installed skill such as `using-superpowers` can request activation
+before every response. Conduit does not install it. Check the actual profile:
+the normal app and `cxg` can use different skill directories. Disable the
+unwanted skill and start a fresh conversation.
+
+Separately, Copilot may return changing opaque IDs for the same streamed
+item. Conduit now stabilizes those IDs by output position, so the GUI does
+not treat a streamed message and its completed form as different messages.
+It does not remove matching text or skip model requests. See
+[the diagnosis and verification](./CODEX.md#unexpected-skill-use-or-duplicate-greeting-replies).
+
 ## Does Codex computer use work?
 
 There are three distinct paths:
